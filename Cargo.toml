@@ -1,0 +1,7 @@
+[package]
+name = "simplelisp"
+version = "0.8.0"
+edition = "2021"
+
+[dependencies]
+# rustyline = "14"
