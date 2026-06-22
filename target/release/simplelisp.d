@@ -1,0 +1,1 @@
+/home/thelakeman/projects/artifacts/simplelisp/target/release/simplelisp: /home/thelakeman/projects/artifacts/simplelisp/src/env.rs /home/thelakeman/projects/artifacts/simplelisp/src/eval.rs /home/thelakeman/projects/artifacts/simplelisp/src/lexer.rs /home/thelakeman/projects/artifacts/simplelisp/src/main.rs /home/thelakeman/projects/artifacts/simplelisp/src/parser.rs

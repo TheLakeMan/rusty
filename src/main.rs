@@ -1,5 +1,4 @@
 use std::io::{self, Write};
- 
 
 mod lexer;
 mod parser;
@@ -7,18 +6,17 @@ mod env;
 mod eval;
 
 use lexer::Lexer;
-use parser::{Parser, Expr};
+use parser::Parser;
 use env::{Environment, Value};
 use eval::Evaluator;
 
 fn main() {
-    println!("🚀 SimpleLisp Rust v0.7 - TCO, Hygienic Macros, Full Features");
+    println!("🚀 SimpleLisp Rust v0.8.0 - TCO, Hygienic Macros, Full Features");
     println!("REPL Ready. Type expressions or 'quit' to exit.\n");
 
     let mut env = Environment::new();
     let mut evaluator = Evaluator::new();
 
-    // Setup basic builtins
     setup_builtins(&mut env);
 
     loop {
@@ -58,7 +56,6 @@ fn setup_builtins(env: &mut Environment) {
             Err("add expects 2 args".to_string())
         }
     }));
-    // Add more builtins as needed
     println!("Basic builtins loaded (add, etc.)");
 }
 
