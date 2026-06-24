@@ -278,7 +278,11 @@ fn setup_builtins(env: &Env) {
         }
     });
     b!("list",    |args| Ok(Value::List(args.to_vec())));
-    b!("null?",   |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Nil)|Some(Value::List(v)) if v.is_empty()))));
+    b!("null?",   |args| Ok(Value::Bool(match args.first() {
+        Some(Value::Nil) => true,
+        Some(Value::List(v)) => v.is_empty(),
+        _ => false,
+    })));
     b!("pair?",   |args| Ok(Value::Bool(matches!(args.first(), Some(Value::List(v)) if !v.is_empty()))));
     b!("list?",   |args| Ok(Value::Bool(matches!(args.first(), Some(Value::List(_))|Some(Value::Nil)))));
     b!("length",  |args| {
@@ -411,7 +415,11 @@ fn setup_builtins(env: &Env) {
     b!("string?",    |args| Ok(Value::Bool(matches!(args.first(), Some(Value::String(_))))));
     b!("boolean?",   |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Bool(_))))));
     b!("symbol?",    |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Symbol(_))))));
-    b!("nil?",       |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Nil)|Some(Value::List(v)) if v.is_empty()))));
+    b!("nil?",       |args| Ok(Value::Bool(match args.first() {
+        Some(Value::Nil) => true,
+        Some(Value::List(v)) => v.is_empty(),
+        _ => false,
+    })));
     b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
         Some(Value::Builtin(..))|Some(Value::Lambda{..})))));
 
