@@ -1,4 +1,4 @@
-# SimpleLisp
+# Rusty
 
 A modern Lisp dialect implemented in Rust with TCO, hygienic macros, and more.
 
@@ -20,4 +20,4 @@ cargo build --release
 (See docs/ or examples/)
 
 ## Status
-v0.8.0 — Complete REPL foundation, TCO, Hygienic Macros, Full Core Port# simplelisp-rust1
+v0.9.2 — Complete REPL foundation, TCO, Hygienic Macros, Full Core Port# simplelisp-rust1
