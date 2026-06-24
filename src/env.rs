@@ -13,8 +13,15 @@ pub enum Value {
     List(Vec<Value>),
     /// Native built-in function
     Builtin(&'static str, fn(&[Value]) -> Result<Value, String>),
-    /// User-defined lambda: params, body exprs, captured env
+    /// User-defined lambda with captured env
     Lambda {
+        params: Vec<String>,
+        rest:   Option<String>,
+        body:   Vec<Expr>,
+        env:    Env,
+    },
+    /// defmacro — like Lambda but args passed unevaluated
+    Macro {
         params: Vec<String>,
         rest:   Option<String>,
         body:   Vec<Expr>,
@@ -33,10 +40,10 @@ impl std::fmt::Display for Value {
                     write!(f, "{}", n)
                 }
             }
-            Value::Bool(true) => write!(f, "#t"),
+            Value::Bool(true)  => write!(f, "#t"),
             Value::Bool(false) => write!(f, "#f"),
-            Value::String(s) => write!(f, "\"{}\"", s),
-            Value::Symbol(s) => write!(f, "{}", s),
+            Value::String(s)   => write!(f, "\"{}\"", s),
+            Value::Symbol(s)   => write!(f, "{}", s),
             Value::List(vs) => {
                 write!(f, "(")?;
                 for (i, v) in vs.iter().enumerate() {
@@ -46,6 +53,7 @@ impl std::fmt::Display for Value {
                 write!(f, ")")
             }
             Value::Builtin(name, _) => write!(f, "#<builtin:{}>", name),
+            Value::Macro { params, .. } => write!(f, "#<macro ({})>", params.join(" ")),
             Value::Lambda { params, rest, .. } => {
                 write!(f, "#<lambda ({}", params.join(" "))?;
                 if let Some(r) = rest { write!(f, " . {}", r)?; }
@@ -67,17 +75,12 @@ pub struct EnvFrame {
 
 impl EnvFrame {
     pub fn new(parent: Option<Env>) -> Env {
-        Rc::new(RefCell::new(EnvFrame {
-            vars: HashMap::new(),
-            parent,
-        }))
+        Rc::new(RefCell::new(EnvFrame { vars: HashMap::new(), parent }))
     }
 
     pub fn get(env: &Env, name: &str) -> Option<Value> {
         let frame = env.borrow();
-        if let Some(v) = frame.vars.get(name) {
-            return Some(v.clone());
-        }
+        if let Some(v) = frame.vars.get(name) { return Some(v.clone()); }
         frame.parent.as_ref().and_then(|p| EnvFrame::get(p, name))
     }
 
@@ -85,7 +88,6 @@ impl EnvFrame {
         env.borrow_mut().vars.insert(name, value);
     }
 
-    /// Mutate existing binding (for set!)
     pub fn set_existing(env: &Env, name: &str, value: Value) -> bool {
         let mut frame = env.borrow_mut();
         if frame.vars.contains_key(name) {
