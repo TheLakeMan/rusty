@@ -9,13 +9,14 @@ pub enum Value {
     Number(f64),
     Bool(bool),
     String(String),
+    Symbol(String),
     List(Vec<Value>),
     /// Native built-in function
     Builtin(&'static str, fn(&[Value]) -> Result<Value, String>),
     /// User-defined lambda: params, body exprs, captured env
     Lambda {
         params: Vec<String>,
-        rest:   Option<String>,   // variadic tail (. rest) 
+        rest:   Option<String>,
         body:   Vec<Expr>,
         env:    Env,
     },
@@ -35,6 +36,7 @@ impl std::fmt::Display for Value {
             Value::Bool(true) => write!(f, "#t"),
             Value::Bool(false) => write!(f, "#f"),
             Value::String(s) => write!(f, "\"{}\"", s),
+            Value::Symbol(s) => write!(f, "{}", s),
             Value::List(vs) => {
                 write!(f, "(")?;
                 for (i, v) in vs.iter().enumerate() {
@@ -57,6 +59,7 @@ impl std::fmt::Display for Value {
 /// Shared, ref-counted environment frame.
 pub type Env = Rc<RefCell<EnvFrame>>;
 
+#[derive(Debug)]
 pub struct EnvFrame {
     vars:   HashMap<String, Value>,
     parent: Option<Env>,
