@@ -221,7 +221,11 @@ fn setup_builtins(env: &Env) {
     b!(">=", |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a>=b)) });
 
     // SimpleLisp-compatible comparison aliases
-    alias!("eq",  "=");
+    // eq uses Python == semantics — works on any type
+    b!("eq", |args| {
+        if args.len() != 2 { return Err("eq: 2 args".into()); }
+        Ok(Value::Bool(value_equal(&args[0], &args[1])))
+    });
     alias!("gt",  ">");
     alias!("lt",  "<");
     alias!("ge",  ">=");
@@ -500,10 +504,7 @@ fn setup_builtins(env: &Env) {
     });
     b!("newline", |_| { println!(); Ok(Value::Nil) });
     b!("print",   |args| {
-        let parts: Vec<String> = args.iter().map(|v| match v {
-            Value::String(s) => s.clone(),
-            other => format!("{}", other),
-        }).collect();
+        let parts: Vec<String> = args.iter().map(print_repr).collect();
         println!("{}", parts.join(" "));
         Ok(Value::Nil)
     });
@@ -551,4 +552,16 @@ fn setup_builtins(env: &Env) {
 fn format_number(n: f64) -> String {
     if n.fract() == 0.0 && n.abs() < 1e15 { format!("{}", n as i64) }
     else { format!("{}", n) }
+}
+
+// Print a value the way Python's str() does — strings unquoted, lists without quotes on elements
+fn print_repr(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::List(xs) => {
+            let inner: Vec<String> = xs.iter().map(print_repr).collect();
+            format!("({})", inner.join(" "))
+        }
+        other => format!("{}", other),
+    }
 }
