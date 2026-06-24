@@ -1,0 +1,32 @@
+add
+sub negative
+mul
+div
+eq true
+eq false
+gt
+lt
+ge
+le
+neq
+not
+string equality
+string escape
+list
+car
+cdr
+cons
+length
+append
+recursive list sum
+counter first
+counter second
+adder closure
+local recursive factorial
+map
+filter
+shadow first
+shadow second
+compose
+fibonacci
+ALL TESTS PASSED

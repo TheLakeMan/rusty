@@ -1,1 +1,0 @@
-/home/thelakeman/projects/artifacts/rusty/target/debug/rusty: /home/thelakeman/projects/artifacts/rusty/src/env.rs /home/thelakeman/projects/artifacts/rusty/src/eval.rs /home/thelakeman/projects/artifacts/rusty/src/lexer.rs /home/thelakeman/projects/artifacts/rusty/src/main.rs /home/thelakeman/projects/artifacts/rusty/src/parser.rs
