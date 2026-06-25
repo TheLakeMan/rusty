@@ -10,7 +10,7 @@ use eval::Evaluator;
 use rustyline::DefaultEditor;
 
 fn main() {
-    println!("🦀 Rusty v0.9.1 — A Lisp in Rust");
+    println!("🦀 Rusty v0.10.0 — A Lisp in Rust");
     println!("   In memory of my brother.");
     println!("   Type (help) or 'quit' to exit.\n");
 
@@ -488,6 +488,34 @@ fn setup_builtins(env: &Env) {
         }else{Err("string->list: not a string".into())}
     });
 
+    // ---- String Interpolation (NEW in v0.10) ----
+    // Option 1: Simple variadic str function
+    // (str "Hello" name "you are" age) → "Hello<value of name>you are<value of age>"
+    b!("str", |args| {
+        let mut result = String::new();
+        for arg in args {
+            match arg {
+                Value::String(s) => result.push_str(s),
+                Value::Number(n) => result.push_str(&format_number(*n)),
+                Value::Bool(b) => result.push_str(if *b { "#t" } else { "#f" }),
+                Value::Nil => result.push_str("()"),
+                Value::Symbol(s) => result.push_str(s),
+                Value::List(xs) => {
+                    result.push('(');
+                    for (i, v) in xs.iter().enumerate() {
+                        if i > 0 { result.push(' '); }
+                        result.push_str(&v.to_string());
+                    }
+                    result.push(')');
+                }
+                Value::Builtin(name, _) => result.push_str(&format!("#<builtin:{}>", name)),
+                Value::Lambda { .. } => result.push_str("#<lambda>"),
+                Value::Macro { .. } => result.push_str("#<macro>"),
+            }
+        }
+        Ok(Value::String(result))
+    });
+
     // ---- Math extras ----
     b!("gcd", |args| {
         fn gcd(a: u64, b: u64) -> u64 { if b==0{a}else{gcd(b,a%b)} }
@@ -518,7 +546,7 @@ fn setup_builtins(env: &Env) {
 
     // ---- Help ----
     b!("help", |_| {
-        println!("Rusty v0.9.1 — SimpleLisp-compatible Lisp in Rust");
+        println!("Rusty v0.10.0 — SimpleLisp-compatible Lisp in Rust");
         println!();
         println!("Special forms:");
         println!("  (define name expr)          bind name to value");
@@ -541,7 +569,7 @@ fn setup_builtins(env: &Env) {
         println!("Compare:    = < > <= >= eq? equal? not zero? positive? negative?");
         println!("Lists:      cons car cdr list null? pair? length append reverse");
         println!("            nth member list-tail map filter foldl foldr for-each apply");
-        println!("Strings:    string-length string-append substring string-ref string=?");
+        println!("Strings:    str string-length string-append substring string-ref string=?");
         println!("            number->string string->number symbol->string");
         println!("Types:      number? string? boolean? symbol? list? procedure? nil?");
         println!("I/O:        display newline print error");
