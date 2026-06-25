@@ -17,6 +17,7 @@ fn main() {
     let global = EnvFrame::new(None);
     let eval = Evaluator::new();
     setup_builtins(&global);
+    load_stdlib(&global, &eval);
 
     // Run a file if passed as argument
     let args: Vec<String> = std::env::args().collect();
@@ -109,11 +110,6 @@ fn check_complete(text: &str) -> InputStatus {
     if depth > 0 { InputStatus::Incomplete } else { InputStatus::Complete }
 }
 
-fn run_code(input: &str, env: &Env, eval: &Evaluator) -> Result<Value, String> {
-    let tokens = Lexer::new(input).tokenize();
-    let ast    = Parser::new(tokens).parse();
-    eval.eval_all(&ast, env)
-}
 
 // ---- Value helpers ----
 
@@ -425,7 +421,8 @@ fn setup_builtins(env: &Env) {
         _ => false,
     })));
     b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
-        Some(Value::Builtin(..))|Some(Value::Lambda{..})))));
+        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})))));
+    b!("macro?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Macro{..})))));
 
     // ---- String ops ----
     b!("string-length",  |args| {
@@ -575,7 +572,43 @@ fn setup_builtins(env: &Env) {
         println!("I/O:        display newline print error");
         Ok(Value::Nil)
     });
+
+    // ---- Macro utilities ----
+    b!("gensym", |args| {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let prefix = match args.first() {
+            Some(Value::String(s)) | Some(Value::Symbol(s)) => s.clone(),
+            _ => "g".to_string(),
+        };
+        Ok(Value::Symbol(format!("{}__{}", prefix, n)))
+    });
 }
+
+fn run_code(input: &str, env: &Env, eval: &Evaluator) -> Result<Value, String> {
+    let tokens = Lexer::new(input).tokenize();
+    let ast    = Parser::new(tokens).parse();
+    eval.eval_all(&ast, env)
+}
+
+fn load_stdlib(env: &Env, eval: &Evaluator) {
+    // Try external std.lisp first (allows user customisation)
+    for path in &["std.lisp", "/usr/local/share/rusty/std.lisp"] {
+        if let Ok(code) = std::fs::read_to_string(path) {
+            if let Err(e) = run_code(&code, env, eval) {
+                eprintln!("Warning: stdlib error in {}: {}", path, e);
+            }
+            return;
+        }
+    }
+    // Embedded fallback
+    if let Err(e) = run_code(STDLIB, env, eval) {
+        eprintln!("Warning: embedded stdlib error: {}", e);
+    }
+}
+
+const STDLIB: &str = include_str!("../std.lisp");
 
 fn format_number(n: f64) -> String {
     if n.fract() == 0.0 && n.abs() < 1e15 { format!("{}", n as i64) }
