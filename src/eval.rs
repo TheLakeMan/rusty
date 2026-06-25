@@ -224,7 +224,7 @@ impl Evaluator {
         }
     }
 
-    // ── quasiquote ──────────────────────────────────────────────────────────
+    // ── quasiquote ────────────────────────────────────────────────────────
     fn expand_quasiquote(&self, expr: &Expr, env: &Env) -> Result<Value, String> {
         match expr {
             Expr::List(list) if !list.is_empty() => {
@@ -298,7 +298,7 @@ impl Evaluator {
         Ok(Value::Lambda { params, rest, body: list[2..].to_vec(), env: env.clone() })
     }
 
-    // ── let forms ───────────────────────────────────────────────────────────
+    // ── let forms ─────────────────────────────────────────────────────────
     fn eval_let(&self, list: &[Expr], env: &Env) -> Result<(Expr, Env), String> {
         let (bindings, body) = extract_let_parts(list)?;
         let child = EnvFrame::new(Some(env.clone()));
@@ -357,7 +357,7 @@ impl Evaluator {
         Ok((wrap_begin(body), call_env))
     }
 
-    // ── do loop ─────────────────────────────────────────────────────────────
+    // ── do loop ─────────────────────────────────────────────────────────
     // (do ((var init step)...) (test result...) body...)
     fn eval_do(&self, list: &[Expr], env: &Env) -> Result<Value, String> {
         if list.len() < 3 { return Err("do: (do ((var init step)...) (test result...) body...)".into()); }
@@ -406,7 +406,7 @@ impl Evaluator {
     }
 }
 
-// ── free helpers ────────────────────────────────────────────────────────────
+// ── free helpers ─────────────────────────────────────────────────────────
 
 pub fn is_truthy(v: &Value) -> bool {
     !matches!(v, Value::Bool(false) | Value::Nil)
