@@ -55,7 +55,7 @@ fn main() {
                         let _ = rl.add_history_entry(&buffer);
                         match run_code(&buffer, &global, &eval) {
                             Ok(Value::Nil) => {}
-                            Ok(v)          => println!("=> {}", print_repr(&v)),
+                            Ok(v)          => println!("=> {}", v),
                             Err(e)         => println!("Error: {}", e),
                         }
                         buffer.clear();
@@ -420,6 +420,8 @@ fn setup_builtins(env: &Env) {
         Some(Value::List(v)) => v.is_empty(),
         _ => false,
     })));
+    b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
+        Some(Value::Builtin(..))|Some(Value::Lambda{..})))));
 
     // ---- String ops ----
     b!("string-length",  |args| {
@@ -557,30 +559,50 @@ fn setup_builtins(env: &Env) {
         println!("  (begin e1 e2 ...)            sequence");
         println!("  (and ...) (or ...)           short-circuit logic");
         println!("  (quote x)  'x               literal data");
-        println!("  (defmacro name (p) body)    define a macro");
-        println!("  (do ((v i s)...) (t r) b)  loop construct");
-        println!("  (let name ((v i)...) body)  named let / loop");
+        println!("  (defmacro n (p) b)           define macro");
+        println!("  (do ((v i s)...) (t r) b)   loop");
+        println!("  (let name ((v i)...) body)   named let");
+        println!("  (try-catch body (e) handler) exception handling");
+        println!("  (match val clauses...)       pattern matching");
         println!();
         println!("Arithmetic: + - * / mod expt abs sqrt floor ceiling round max min gcd");
         println!("Aliases:    add sub mul div eq gt lt ge le neq");
         println!("Compare:    = < > <= >= eq? equal? not zero? positive? negative? odd? even?");
         println!("Lists:      cons car cdr list null? pair? length append reverse");
         println!("            nth member list-tail map filter foldl foldr for-each apply");
-        println!("Strings:    string-length string-append substring string-ref string=?");
-        println!("            string-append-list number->string string->number symbol->string");
-        println!("Types:      number? string? boolean? symbol? list? procedure? macro? nil?");
-        println!("Macros:     gensym macro?");
+        println!("Strings:    format string-length string-append string-append-list");
+        println!("            substring string-ref string=? number->string string->number");
+        println!("Types:      number? string? boolean? symbol? list? procedure? macro? nil? type-of");
+        println!("I/O:        display newline print println error");
+        println!("Files:      load load-relative");
         println!("JSON:       json-encode json-decode");
-        println!("Errors:     error try-catch");
-        println!("I/O:        display newline print println");
+        println!("Macros:     gensym macro?");
         Ok(Value::Nil)
     });
 
-    // ── Macro utilities ────────────────────────────────────────────────────
+    // ── macro? / procedure? (with Macro variant) ──────────────────────────
     b!("macro?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Macro{..})))));
     b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
         Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})))));
 
+    // ── type-of ───────────────────────────────────────────────────────────
+    b!("type-of", |args| {
+        let t = match args.first() {
+            Some(Value::Number(_))   => "number",
+            Some(Value::Bool(_))     => "boolean",
+            Some(Value::String(_))   => "string",
+            Some(Value::Symbol(_))   => "symbol",
+            Some(Value::List(_))     => "list",
+            Some(Value::Nil)         => "nil",
+            Some(Value::Builtin(..)) => "builtin",
+            Some(Value::Lambda{..})  => "lambda",
+            Some(Value::Macro{..})   => "macro",
+            None                     => "nil",
+        };
+        Ok(Value::Symbol(t.to_string()))
+    });
+
+    // ── gensym ────────────────────────────────────────────────────────────
     b!("gensym", |args| {
         use std::sync::atomic::{AtomicU64, Ordering};
         static CTR: AtomicU64 = AtomicU64::new(0);
@@ -592,6 +614,40 @@ fn setup_builtins(env: &Env) {
         Ok(Value::Symbol(format!("{}__{}", prefix, n)))
     });
 
+    // ── format ────────────────────────────────────────────────────────────
+    // (format template arg...) — ~a=any ~s=quoted ~%=newline ~~=tilde
+    b!("format", |args| {
+        if args.is_empty() { return Err("format: needs a template string".into()); }
+        let tmpl = match &args[0] {
+            Value::String(s) => s.clone(),
+            _ => return Err("format: first arg must be a string".into()),
+        };
+        let mut out   = String::new();
+        let mut chars = tmpl.chars().peekable();
+        let mut idx   = 1usize;
+        while let Some(c) = chars.next() {
+            if c != '~' { out.push(c); continue; }
+            match chars.next() {
+                Some('a') | Some('A') => {
+                    let v = args.get(idx).ok_or_else(|| format!("format: not enough args at ~a position {}", idx))?;
+                    out.push_str(&print_repr(v));
+                    idx += 1;
+                }
+                Some('s') | Some('S') => {
+                    let v = args.get(idx).ok_or_else(|| format!("format: not enough args at ~s position {}", idx))?;
+                    out.push_str(&format!("{}", v));
+                    idx += 1;
+                }
+                Some('%') => out.push('\n'),
+                Some('~') => out.push('~'),
+                Some('t') | Some('T') => out.push('\t'),
+                Some(x)  => { out.push('~'); out.push(x); }
+                None     => out.push('~'),
+            }
+        }
+        Ok(Value::String(out))
+    });
+
     // ── string-append-list ────────────────────────────────────────────────
     b!("string-append-list", |args| {
         match args.first() {
@@ -600,7 +656,7 @@ fn setup_builtins(env: &Env) {
                 for v in xs {
                     match v {
                         Value::String(s) => out.push_str(s),
-                        other => out.push_str(&format!("{}", other)),
+                        other => out.push_str(&print_repr(other)),
                     }
                 }
                 Ok(Value::String(out))
@@ -609,75 +665,56 @@ fn setup_builtins(env: &Env) {
         }
     });
 
-    // ── JSON encode/decode ────────────────────────────────────────────────
-    b!("json-encode", |args| {
-        if args.len() != 1 { return Err("json-encode: 1 arg".into()); }
-        Ok(Value::String(json_encode(&args[0])))
-    });
-
-    b!("json-decode", |args| {
-        if let Some(Value::String(s)) = args.first() {
-            json_decode(s.trim())
-                .map_err(|e| format!("json-decode: {}", e))
-        } else {
-            Err("json-decode: expected a string".into())
-        }
-    });
-
-    // ── try-catch ─────────────────────────────────────────────────────────
-    // try-catch is a special form in eval.rs; this stub is for documentation
-    // (it's handled before builtins are checked)
-
-    // ── println convenience ───────────────────────────────────────────────
+    // ── println ───────────────────────────────────────────────────────────
     b!("println", |args| {
         let parts: Vec<String> = args.iter().map(print_repr).collect();
         println!("{}", parts.join(" "));
         Ok(Value::Nil)
     });
 
-    // ── type-of ───────────────────────────────────────────────────────────
-    b!("type-of", |args| {
-        let t = match args.first() {
-            Some(Value::Number(_))  => "number",
-            Some(Value::Bool(_))    => "boolean",
-            Some(Value::String(_))  => "string",
-            Some(Value::Symbol(_))  => "symbol",
-            Some(Value::List(_))    => "list",
-            Some(Value::Nil)        => "nil",
-            Some(Value::Builtin(..))=> "builtin",
-            Some(Value::Lambda{..}) => "lambda",
-            Some(Value::Macro{..})  => "macro",
-            None                    => "nil",
-        };
-        Ok(Value::Symbol(t.to_string()))
+    // ── JSON ──────────────────────────────────────────────────────────────
+    b!("json-encode", |args| {
+        if args.len() != 1 { return Err("json-encode: 1 arg".into()); }
+        Ok(Value::String(json_encode(&args[0])))
     });
+    b!("json-decode", |args| {
+        if let Some(Value::String(s)) = args.first() {
+            json_decode(s.trim()).map_err(|e| format!("json-decode: {}", e))
+        } else { Err("json-decode: expected a string".into()) }
+    });
+
+    // ── load / load-relative ──────────────────────────────────────────────
+    // These need access to eval+env, so they're wired as closures via a
+    // special Value::Builtin can't close over env — handled in eval.rs as
+    // special forms "load" and "load-relative". Stubs here for help text only.
 }
 
-// ── JSON encoder ──────────────────────────────────────────────────────────
+// ── JSON encode/decode ────────────────────────────────────────────────────
 
 fn json_encode(v: &Value) -> String {
     match v {
-        Value::Nil            => "null".to_string(),
-        Value::Bool(b)        => b.to_string(),
-        Value::Number(n)      => format_number(*n),
-        Value::String(s)      => {
-            let escaped = s.replace('\\', "\\\\").replace('"', "\\\"")
-                           .replace('\n', "\\n").replace('\t', "\\t");
-            format!("\"{}\"", escaped)
+        Value::Nil        => "null".to_string(),
+        Value::Bool(b)    => b.to_string(),
+        Value::Number(n)  => format_number(*n),
+        Value::String(s)  => {
+            let e = s.replace('\\', "\\\\").replace('"', "\\\"")
+                     .replace('\n', "\\n").replace('\t', "\\t");
+            format!("\"{}\"", e)
         }
-        Value::Symbol(s)      => format!("\"{}\"", s),
+        Value::Symbol(s)  => format!("\"{}\"", s),
         Value::List(xs) if xs.is_empty() => "[]".to_string(),
         Value::List(xs) => {
-            // Detect association list (list of 2-element lists) → object
-            let is_alist = xs.iter().all(|x| matches!(x, Value::List(p) if p.len() == 2));
+            let is_alist = xs.iter().all(|x| matches!(x,
+                Value::List(p) if p.len() == 2
+                    && matches!(&p[0], Value::String(_)|Value::Symbol(_))));
             if is_alist {
                 let pairs: Vec<String> = xs.iter().map(|x| {
                     if let Value::List(p) = x {
-                        let key = match &p[0] {
-                            Value::String(s) | Value::Symbol(s) => format!("\"{}\"", s),
+                        let k = match &p[0] {
+                            Value::String(s)|Value::Symbol(s) => s.clone(),
                             other => json_encode(other),
                         };
-                        format!("{}: {}", key, json_encode(&p[1]))
+                        format!("\"{}\": {}", k, json_encode(&p[1]))
                     } else { "null".to_string() }
                 }).collect();
                 format!("{{{}}}", pairs.join(", "))
@@ -693,27 +730,26 @@ fn json_encode(v: &Value) -> String {
 fn json_decode(s: &str) -> Result<Value, String> {
     let s = s.trim();
     if s == "null" || s == "()" { return Ok(Value::Nil); }
-    if s == "true"  { return Ok(Value::Bool(true)); }
-    if s == "false" { return Ok(Value::Bool(false)); }
+    if s == "true"              { return Ok(Value::Bool(true)); }
+    if s == "false"             { return Ok(Value::Bool(false)); }
     if let Ok(n) = s.parse::<f64>() { return Ok(Value::Number(n)); }
-    if s.starts_with('"') && s.ends_with('"') {
-        return Ok(Value::String(s[1..s.len()-1]
-            .replace("\\n", "\n").replace("\\t", "\t")
-            .replace("\\\"", "\"").replace("\\\\", "\\")));
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        return Ok(Value::String(
+            s[1..s.len()-1].replace("\\n","\n").replace("\\t","\t")
+                           .replace("\\\"","\"").replace("\\\\","\\")));
     }
     if s.starts_with('[') && s.ends_with(']') {
         let inner = s[1..s.len()-1].trim();
         if inner.is_empty() { return Ok(Value::List(vec![])); }
-        let items = json_split(inner)?;
-        let vals: Result<Vec<Value>, _> = items.iter().map(|i| json_decode(i)).collect();
+        let vals: Result<Vec<Value>,_> = json_split(inner)?.iter()
+            .map(|i| json_decode(i)).collect();
         return Ok(Value::List(vals?));
     }
     if s.starts_with('{') && s.ends_with('}') {
         let inner = s[1..s.len()-1].trim();
         if inner.is_empty() { return Ok(Value::List(vec![])); }
-        let pairs = json_split(inner)?;
         let mut alist = Vec::new();
-        for pair in pairs {
+        for pair in json_split(inner)? {
             let pair = pair.trim();
             if let Some(colon) = find_json_colon(pair) {
                 let key = json_decode(pair[..colon].trim())?;
@@ -723,26 +759,25 @@ fn json_decode(s: &str) -> Result<Value, String> {
         }
         return Ok(Value::List(alist));
     }
-    Err(format!("Cannot decode JSON: {}", s))
+    Err(format!("Cannot parse JSON: {}", &s[..s.len().min(40)]))
 }
 
 fn json_split(s: &str) -> Result<Vec<String>, String> {
-    let mut items = Vec::new();
-    let mut depth = 0i32;
+    let mut items  = Vec::new();
+    let mut depth  = 0i32;
     let mut in_str = false;
     let mut escape = false;
-    let mut start = 0;
+    let mut start  = 0usize;
     for (i, c) in s.char_indices() {
         if escape { escape = false; continue; }
         if in_str {
-            if c == '\\' { escape = true; }
-            else if c == '"' { in_str = false; }
+            if c == '\\' { escape = true; } else if c == '"' { in_str = false; }
             continue;
         }
         match c {
-            '"'       => in_str = true,
-            '['|'{'   => depth += 1,
-            ']'|'}'   => depth -= 1,
+            '"'     => in_str = true,
+            '['|'{' => depth += 1,
+            ']'|'}' => depth -= 1,
             ',' if depth == 0 => {
                 items.push(s[start..i].trim().to_string());
                 start = i + 1;
@@ -775,7 +810,6 @@ fn run_code(input: &str, env: &Env, eval: &Evaluator) -> Result<Value, String> {
 }
 
 fn load_stdlib(env: &Env, eval: &Evaluator) {
-    // External std.lisp takes priority (user can customise)
     for path in &["std.lisp", "/usr/local/share/rusty/std.lisp"] {
         if let Ok(code) = std::fs::read_to_string(path) {
             if let Err(e) = run_code(&code, env, eval) {
@@ -784,7 +818,6 @@ fn load_stdlib(env: &Env, eval: &Evaluator) {
             return;
         }
     }
-    // Embedded fallback
     if let Err(e) = run_code(STDLIB, env, eval) {
         eprintln!("Warning: embedded stdlib error: {}", e);
     }
