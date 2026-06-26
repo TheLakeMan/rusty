@@ -182,28 +182,79 @@ impl Evaluator {
 
                             "do" => return self.eval_do(list, &env),
 
-                            // (try-catch body (err-var) handler)
+                            // ── (load "file.lisp") ──────────────────────
+                            "load" | "load-relative" => {
+                                if list.len() != 2 {
+                                    return Err(format!("{}: expects a filename", head));
+                                }
+                                let path_val = self.eval(&list[1], &env)?;
+                                let path_str = match &path_val {
+                                    Value::String(s) => s.clone(),
+                                    _ => return Err(format!("{}: filename must be a string", head)),
+                                };
+                                let code = std::fs::read_to_string(&path_str)
+                                    .map_err(|e| format!("load: cannot read '{}': {}", path_str, e))?;
+                                let tokens = crate::lexer::Lexer::new(&code).tokenize();
+                                let ast    = crate::parser::Parser::new(tokens).parse();
+                                return self.eval_all(&ast, &env);
+                            }
+
+                            // ── (try-catch body (err) handler) ──────────
                             "try-catch" => {
-                                if list.len() < 3 {
+                                if list.len() < 4 {
                                     return Err("try-catch: (try-catch body (err) handler)".into());
                                 }
                                 match self.eval(&list[1], &env) {
                                     Ok(v) => return Ok(v),
                                     Err(e) => {
-                                        // Bind error string to err-var and eval handler
-                                        let handler_env = EnvFrame::new(Some(env.clone()));
-                                        if let Some(Expr::List(vars)) = list.get(2) {
+                                        let catch_env = EnvFrame::new(Some(env.clone()));
+                                        if let Expr::List(vars) = &list[2] {
                                             if let Some(Expr::Symbol(name)) = vars.first() {
-                                                EnvFrame::set(&handler_env, name.clone(),
+                                                EnvFrame::set(&catch_env, name.clone(),
                                                     Value::String(e));
                                             }
                                         }
-                                        let handler = list.get(3)
-                                            .ok_or("try-catch: missing handler")?;
-                                        cur = handler.clone();
-                                        env = handler_env;
+                                        cur = list[3].clone();
+                                        env = catch_env;
                                         continue;
                                     }
+                                }
+                            }
+
+                            // ── (match expr (pat body)...) ───────────────
+                            "match" => {
+                                if list.len() < 3 {
+                                    return Err("match: (match expr (pattern body)...)".into());
+                                }
+                                let subject = self.eval(&list[1], &env)?;
+                                let mut matched = None;
+                                'clauses: for clause in &list[2..] {
+                                    if let Expr::List(c) = clause {
+                                        if c.len() < 2 { continue; }
+                                        let pat = &c[0];
+                                        let body_exprs = &c[1..];
+                                        let mut bindings: Vec<(String, Value)> = Vec::new();
+                                        if match_pattern(pat, &subject, &mut bindings) {
+                                            let match_env = EnvFrame::new(Some(env.clone()));
+                                            for (name, val) in bindings {
+                                                EnvFrame::set(&match_env, name, val);
+                                            }
+                                            let last = body_exprs.len() - 1;
+                                            for e in &body_exprs[..last] {
+                                                self.eval(e, &match_env)?;
+                                            }
+                                            matched = Some((body_exprs[last].clone(), match_env));
+                                            break 'clauses;
+                                        }
+                                    }
+                                }
+                                match matched {
+                                    Some((body, match_env)) => {
+                                        cur = body;
+                                        env = match_env;
+                                        continue;
+                                    }
+                                    None => return Err(format!("match: no clause matched {}", subject)),
                                 }
                             }
 
@@ -504,4 +555,132 @@ fn extract_let_parts(list: &[Expr]) -> Result<(Vec<(String, Expr)>, Vec<Expr>), 
 pub fn wrap_begin(mut exprs: Vec<Expr>) -> Expr {
     if exprs.len() == 1 { exprs.remove(0) }
     else { let mut v = vec![Expr::Symbol("begin".into())]; v.extend(exprs); Expr::List(v) }
+}
+
+// ── Pattern matching helper ───────────────────────────────────────────────
+//
+// Patterns:
+//   _                  — wildcard, matches anything
+//   42 / "str" / #t   — literal match
+//   x                  — symbol binding (binds value to x)
+//   (list p1 p2 ...)   — list pattern
+//   (cons h t)         — head/tail destructure
+//   (quote sym)        — match literal symbol
+//   (? pred)           — guard: match if (pred value) is truthy
+//
+pub fn match_pattern(pat: &Expr, val: &Value, bindings: &mut Vec<(String, Value)>) -> bool {
+    match pat {
+        // Wildcard
+        Expr::Symbol(s) if s == "_" => true,
+
+        // Symbol → bind
+        Expr::Symbol(s) => {
+            bindings.push((s.clone(), val.clone()));
+            true
+        }
+
+        // Literal number
+        Expr::Number(n) => matches!(val, Value::Number(v) if v == n),
+
+        // Literal bool
+        Expr::Bool(b) => matches!(val, Value::Bool(v) if v == b),
+
+        // Literal string
+        Expr::String(s) => matches!(val, Value::String(v) if v == s),
+
+        // Nil / empty list
+        Expr::Nil => matches!(val, Value::Nil) || matches!(val, Value::List(v) if v.is_empty()),
+
+        // List pattern
+        Expr::List(pats) if !pats.is_empty() => {
+            // (quote sym) — match literal symbol
+            if let Expr::Symbol(head) = &pats[0] {
+                if head == "quote" && pats.len() == 2 {
+                    if let Expr::Symbol(sym) = &pats[1] {
+                        return matches!(val, Value::Symbol(s) if s == sym);
+                    }
+                }
+
+                // (? pred-expr) — guard pattern (pred applied to value)
+                if head == "?" && pats.len() == 2 {
+                    // We can't easily eval here without an env reference,
+                    // so guard is a symbol predicate check: (? number?) etc.
+                    if let Expr::Symbol(pred) = &pats[1] {
+                        return match pred.as_str() {
+                            "number?"  => matches!(val, Value::Number(_)),
+                            "string?"  => matches!(val, Value::String(_)),
+                            "boolean?" => matches!(val, Value::Bool(_)),
+                            "list?"    => matches!(val, Value::List(_) | Value::Nil),
+                            "symbol?"  => matches!(val, Value::Symbol(_)),
+                            "nil?"     => matches!(val, Value::Nil),
+                            "pair?"    => matches!(val, Value::List(v) if !v.is_empty()),
+                            "zero?"    => matches!(val, Value::Number(n) if *n == 0.0),
+                            "positive?"=> matches!(val, Value::Number(n) if *n > 0.0),
+                            "negative?"=> matches!(val, Value::Number(n) if *n < 0.0),
+                            _          => false,
+                        };
+                    }
+                }
+
+                // (cons head tail) — destructure list
+                if head == "cons" && pats.len() == 3 {
+                    if let Value::List(xs) = val {
+                        if xs.is_empty() { return false; }
+                        let h = xs[0].clone();
+                        let t = Value::List(xs[1..].to_vec());
+                        let save = bindings.len();
+                        if match_pattern(&pats[1], &h, bindings)
+                            && match_pattern(&pats[2], &t, bindings) {
+                            return true;
+                        }
+                        bindings.truncate(save);
+                        return false;
+                    }
+                    return false;
+                }
+            }
+
+            // (p1 p2 ...) — fixed-length list pattern
+            // OR (p1 p2 . rest) — dotted rest pattern (last pat is `. rest-var`)
+            if let Value::List(vals) = val {
+                // Check for dotted rest: if second-to-last pattern is the symbol "."
+                // e.g. pattern (a b . rest) parsed as list [a, b, ., rest]
+                let dot_pos = pats.iter().position(|p| matches!(p, Expr::Symbol(s) if s == "."));
+                if let Some(dp) = dot_pos {
+                    // Fixed part: pats[..dp], rest var: pats[dp+1]
+                    if dp + 1 >= pats.len() { return false; }
+                    if vals.len() < dp { return false; }
+                    let save = bindings.len();
+                    for (p, v) in pats[..dp].iter().zip(vals[..dp].iter()) {
+                        if !match_pattern(p, v, bindings) {
+                            bindings.truncate(save);
+                            return false;
+                        }
+                    }
+                    // Bind rest variable to remaining items
+                    let rest_val = Value::List(vals[dp..].to_vec());
+                    if !match_pattern(&pats[dp+1], &rest_val, bindings) {
+                        bindings.truncate(save);
+                        return false;
+                    }
+                    return true;
+                }
+
+                // Fixed-length: must match exactly
+                if vals.len() != pats.len() { return false; }
+                let save = bindings.len();
+                for (p, v) in pats.iter().zip(vals.iter()) {
+                    if !match_pattern(p, v, bindings) {
+                        bindings.truncate(save);
+                        return false;
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }
+
+        _ => false,
+    }
 }
