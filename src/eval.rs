@@ -182,6 +182,31 @@ impl Evaluator {
 
                             "do" => return self.eval_do(list, &env),
 
+                            // (try-catch body (err-var) handler)
+                            "try-catch" => {
+                                if list.len() < 3 {
+                                    return Err("try-catch: (try-catch body (err) handler)".into());
+                                }
+                                match self.eval(&list[1], &env) {
+                                    Ok(v) => return Ok(v),
+                                    Err(e) => {
+                                        // Bind error string to err-var and eval handler
+                                        let handler_env = EnvFrame::new(Some(env.clone()));
+                                        if let Some(Expr::List(vars)) = list.get(2) {
+                                            if let Some(Expr::Symbol(name)) = vars.first() {
+                                                EnvFrame::set(&handler_env, name.clone(),
+                                                    Value::String(e));
+                                            }
+                                        }
+                                        let handler = list.get(3)
+                                            .ok_or("try-catch: missing handler")?;
+                                        cur = handler.clone();
+                                        env = handler_env;
+                                        continue;
+                                    }
+                                }
+                            }
+
                             _ => {} // fall through to macro / function call
                         }
                     }
