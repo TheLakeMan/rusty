@@ -55,7 +55,7 @@ fn main() {
                         let _ = rl.add_history_entry(&buffer);
                         match run_code(&buffer, &global, &eval) {
                             Ok(Value::Nil) => {}
-                            Ok(v)          => println!("=> {}", v),
+                            Ok(v)          => println!("=> {}", print_repr(&v)),
                             Err(e)         => println!("Error: {}", e),
                         }
                         buffer.clear();
@@ -420,9 +420,6 @@ fn setup_builtins(env: &Env) {
         Some(Value::List(v)) => v.is_empty(),
         _ => false,
     })));
-    b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
-        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})))));
-    b!("macro?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Macro{..})))));
 
     // ---- String ops ----
     b!("string-length",  |args| {
@@ -560,31 +557,216 @@ fn setup_builtins(env: &Env) {
         println!("  (begin e1 e2 ...)            sequence");
         println!("  (and ...) (or ...)           short-circuit logic");
         println!("  (quote x)  'x               literal data");
+        println!("  (defmacro name (p) body)    define a macro");
+        println!("  (do ((v i s)...) (t r) b)  loop construct");
+        println!("  (let name ((v i)...) body)  named let / loop");
         println!();
-        println!("Arithmetic: + - * / mod expt abs sqrt floor ceiling round max min");
+        println!("Arithmetic: + - * / mod expt abs sqrt floor ceiling round max min gcd");
         println!("Aliases:    add sub mul div eq gt lt ge le neq");
-        println!("Compare:    = < > <= >= eq? equal? not zero? positive? negative?");
+        println!("Compare:    = < > <= >= eq? equal? not zero? positive? negative? odd? even?");
         println!("Lists:      cons car cdr list null? pair? length append reverse");
         println!("            nth member list-tail map filter foldl foldr for-each apply");
-        println!("Strings:    str string-length string-append substring string-ref string=?");
-        println!("            number->string string->number symbol->string");
-        println!("Types:      number? string? boolean? symbol? list? procedure? nil?");
-        println!("I/O:        display newline print error");
+        println!("Strings:    string-length string-append substring string-ref string=?");
+        println!("            string-append-list number->string string->number symbol->string");
+        println!("Types:      number? string? boolean? symbol? list? procedure? macro? nil?");
+        println!("Macros:     gensym macro?");
+        println!("JSON:       json-encode json-decode");
+        println!("Errors:     error try-catch");
+        println!("I/O:        display newline print println");
         Ok(Value::Nil)
     });
 
-    // ---- Macro utilities ----
+    // ── Macro utilities ────────────────────────────────────────────────────
+    b!("macro?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Macro{..})))));
+    b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
+        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})))));
+
     b!("gensym", |args| {
         use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        static CTR: AtomicU64 = AtomicU64::new(0);
+        let n = CTR.fetch_add(1, Ordering::Relaxed);
         let prefix = match args.first() {
             Some(Value::String(s)) | Some(Value::Symbol(s)) => s.clone(),
             _ => "g".to_string(),
         };
         Ok(Value::Symbol(format!("{}__{}", prefix, n)))
     });
+
+    // ── string-append-list ────────────────────────────────────────────────
+    b!("string-append-list", |args| {
+        match args.first() {
+            Some(Value::List(xs)) => {
+                let mut out = String::new();
+                for v in xs {
+                    match v {
+                        Value::String(s) => out.push_str(s),
+                        other => out.push_str(&format!("{}", other)),
+                    }
+                }
+                Ok(Value::String(out))
+            }
+            _ => Err("string-append-list: expected a list".into()),
+        }
+    });
+
+    // ── JSON encode/decode ────────────────────────────────────────────────
+    b!("json-encode", |args| {
+        if args.len() != 1 { return Err("json-encode: 1 arg".into()); }
+        Ok(Value::String(json_encode(&args[0])))
+    });
+
+    b!("json-decode", |args| {
+        if let Some(Value::String(s)) = args.first() {
+            json_decode(s.trim())
+                .map_err(|e| format!("json-decode: {}", e))
+        } else {
+            Err("json-decode: expected a string".into())
+        }
+    });
+
+    // ── try-catch ─────────────────────────────────────────────────────────
+    // try-catch is a special form in eval.rs; this stub is for documentation
+    // (it's handled before builtins are checked)
+
+    // ── println convenience ───────────────────────────────────────────────
+    b!("println", |args| {
+        let parts: Vec<String> = args.iter().map(print_repr).collect();
+        println!("{}", parts.join(" "));
+        Ok(Value::Nil)
+    });
+
+    // ── type-of ───────────────────────────────────────────────────────────
+    b!("type-of", |args| {
+        let t = match args.first() {
+            Some(Value::Number(_))  => "number",
+            Some(Value::Bool(_))    => "boolean",
+            Some(Value::String(_))  => "string",
+            Some(Value::Symbol(_))  => "symbol",
+            Some(Value::List(_))    => "list",
+            Some(Value::Nil)        => "nil",
+            Some(Value::Builtin(..))=> "builtin",
+            Some(Value::Lambda{..}) => "lambda",
+            Some(Value::Macro{..})  => "macro",
+            None                    => "nil",
+        };
+        Ok(Value::Symbol(t.to_string()))
+    });
 }
+
+// ── JSON encoder ──────────────────────────────────────────────────────────
+
+fn json_encode(v: &Value) -> String {
+    match v {
+        Value::Nil            => "null".to_string(),
+        Value::Bool(b)        => b.to_string(),
+        Value::Number(n)      => format_number(*n),
+        Value::String(s)      => {
+            let escaped = s.replace('\\', "\\\\").replace('"', "\\\"")
+                           .replace('\n', "\\n").replace('\t', "\\t");
+            format!("\"{}\"", escaped)
+        }
+        Value::Symbol(s)      => format!("\"{}\"", s),
+        Value::List(xs) if xs.is_empty() => "[]".to_string(),
+        Value::List(xs) => {
+            // Detect association list (list of 2-element lists) → object
+            let is_alist = xs.iter().all(|x| matches!(x, Value::List(p) if p.len() == 2));
+            if is_alist {
+                let pairs: Vec<String> = xs.iter().map(|x| {
+                    if let Value::List(p) = x {
+                        let key = match &p[0] {
+                            Value::String(s) | Value::Symbol(s) => format!("\"{}\"", s),
+                            other => json_encode(other),
+                        };
+                        format!("{}: {}", key, json_encode(&p[1]))
+                    } else { "null".to_string() }
+                }).collect();
+                format!("{{{}}}", pairs.join(", "))
+            } else {
+                let items: Vec<String> = xs.iter().map(json_encode).collect();
+                format!("[{}]", items.join(", "))
+            }
+        }
+        other => format!("\"{}\"", other),
+    }
+}
+
+fn json_decode(s: &str) -> Result<Value, String> {
+    let s = s.trim();
+    if s == "null" || s == "()" { return Ok(Value::Nil); }
+    if s == "true"  { return Ok(Value::Bool(true)); }
+    if s == "false" { return Ok(Value::Bool(false)); }
+    if let Ok(n) = s.parse::<f64>() { return Ok(Value::Number(n)); }
+    if s.starts_with('"') && s.ends_with('"') {
+        return Ok(Value::String(s[1..s.len()-1]
+            .replace("\\n", "\n").replace("\\t", "\t")
+            .replace("\\\"", "\"").replace("\\\\", "\\")));
+    }
+    if s.starts_with('[') && s.ends_with(']') {
+        let inner = s[1..s.len()-1].trim();
+        if inner.is_empty() { return Ok(Value::List(vec![])); }
+        let items = json_split(inner)?;
+        let vals: Result<Vec<Value>, _> = items.iter().map(|i| json_decode(i)).collect();
+        return Ok(Value::List(vals?));
+    }
+    if s.starts_with('{') && s.ends_with('}') {
+        let inner = s[1..s.len()-1].trim();
+        if inner.is_empty() { return Ok(Value::List(vec![])); }
+        let pairs = json_split(inner)?;
+        let mut alist = Vec::new();
+        for pair in pairs {
+            let pair = pair.trim();
+            if let Some(colon) = find_json_colon(pair) {
+                let key = json_decode(pair[..colon].trim())?;
+                let val = json_decode(pair[colon+1..].trim())?;
+                alist.push(Value::List(vec![key, val]));
+            }
+        }
+        return Ok(Value::List(alist));
+    }
+    Err(format!("Cannot decode JSON: {}", s))
+}
+
+fn json_split(s: &str) -> Result<Vec<String>, String> {
+    let mut items = Vec::new();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut escape = false;
+    let mut start = 0;
+    for (i, c) in s.char_indices() {
+        if escape { escape = false; continue; }
+        if in_str {
+            if c == '\\' { escape = true; }
+            else if c == '"' { in_str = false; }
+            continue;
+        }
+        match c {
+            '"'       => in_str = true,
+            '['|'{'   => depth += 1,
+            ']'|'}'   => depth -= 1,
+            ',' if depth == 0 => {
+                items.push(s[start..i].trim().to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    items.push(s[start..].trim().to_string());
+    Ok(items)
+}
+
+fn find_json_colon(s: &str) -> Option<usize> {
+    let mut in_str = false;
+    let mut escape = false;
+    for (i, c) in s.char_indices() {
+        if escape { escape = false; continue; }
+        if in_str { if c == '\\' { escape = true; } else if c == '"' { in_str = false; } continue; }
+        if c == '"' { in_str = true; continue; }
+        if c == ':' { return Some(i); }
+    }
+    None
+}
+
+// ── stdlib loader ─────────────────────────────────────────────────────────
 
 fn run_code(input: &str, env: &Env, eval: &Evaluator) -> Result<Value, String> {
     let tokens = Lexer::new(input).tokenize();
@@ -593,7 +775,7 @@ fn run_code(input: &str, env: &Env, eval: &Evaluator) -> Result<Value, String> {
 }
 
 fn load_stdlib(env: &Env, eval: &Evaluator) {
-    // Try external std.lisp first (allows user customisation)
+    // External std.lisp takes priority (user can customise)
     for path in &["std.lisp", "/usr/local/share/rusty/std.lisp"] {
         if let Ok(code) = std::fs::read_to_string(path) {
             if let Err(e) = run_code(&code, env, eval) {
