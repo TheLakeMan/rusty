@@ -1,7 +1,26 @@
 [package]
-name = "rusty"
-version = "0.9.2"
+name    = "rusty"
+version = "0.10.0"
 edition = "2021"
+
+# Build both a binary (REPL/CLI) and a shared library (PyO3 bridge)
+[[bin]]
+name = "rusty"
+path = "src/main.rs"
+
+[lib]
+name      = "rusty"
+crate-type = ["cdylib", "rlib"]
+path      = "src/lib.rs"
 
 [dependencies]
 rustyline = "14.0"
+
+[dependencies.pyo3]
+version  = "0.29"
+features = ["extension-module", "abi3-py311"]
+
+[profile.release]
+opt-level = 3
+lto       = true
+codegen-units = 1
