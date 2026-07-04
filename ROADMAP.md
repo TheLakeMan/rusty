@@ -64,11 +64,6 @@ In 5 years, Rusty will be:
 
 ### 2.3 Tool Registry with Specifications
 - [ ] **Tool specifications**: Formal signatures + invariants for all tools
-  ```lisp
-  (deftool/spec create-dir (path : string)
-    :pre (not (= path ""))
-    :post (dir-exists? path))
-  ```
 - [ ] **Contract enforcement**: Runtime checks + static verification
 - [ ] **Tool dependency graphs**: Track dependencies and execution order constraints
 - **Deliverable:** Safety certification for agent tool chains (provably safe execution)
@@ -81,7 +76,6 @@ In 5 years, Rusty will be:
 
 ### 3.1 PyTorch / JAX Integration
 - [ ] **Tensor interop**: Zero-copy exchange of ndarrays between Rusty and PyTorch/JAX
-  - `(tensor-from-python py-obj)` → Rusty Value
 - [ ] **Autodiff bridge**: Call rusty-generated gradients from PyTorch
 - [ ] **Model serialization**: Save/load Rusty agent + neural models together
 - **Deliverable:** End-to-end example: PyTorch model + Rusty symbolic reasoning pipeline
@@ -90,10 +84,10 @@ In 5 years, Rusty will be:
 - [ ] **Message passing**: Spawn multiple agent instances, coordinate via Lisp message queue
 - [ ] **Checkpoint / restore**: Serialize agent state (environments, tool results) for fault tolerance
 - [ ] **Tracing & observability**: OpenTelemetry integration for agent execution traces
-- **Deliverable:** Multi-agent system where agents coordinate symbolic reasoning (e.g., collaborative theorem proving)
+- **Deliverable:** Multi-agent system where agents coordinate symbolic reasoning
 
 ### 3.3 Performance & Optimization
-- [ ] **JIT compilation**: Compile hot Rusty code paths to native machine code (via Cranelift or similar)
+- [ ] **JIT compilation**: Compile hot Rusty code paths to native machine code
 - [ ] **Kernel fusion**: Combine adjacent operations into single efficient kernels
 - [ ] **Memory pooling**: Reduce allocations for high-frequency agent loops
 - **Deliverable:** 10x speedup on agent benchmarks vs. naive interpretation
@@ -106,20 +100,18 @@ In 5 years, Rusty will be:
 
 ### 4.1 Symbolic Regression
 - [ ] **Genetic programming for equation discovery**: Find human-readable equations from data
-  - `(symbolic-regress data-points)` → discovers equations like `(+ (* x 2) 1)`
 - [ ] **Macro-based expression generation**: Use macros to explore solution space efficiently
 - **Deliverable:** Library that outperforms symbolic regression benchmarks
 
 ### 4.2 Formal Program Synthesis
 - [ ] **Sketch-based synthesis**: Fill holes in incomplete programs using constraint solving
-  - `(?? (lambda (x) ...))`  where `??` is a hole to fill
 - [ ] **LLM + constraint solver loop**: Use LLM to propose candidates, Rusty constraints to validate
 - **Deliverable:** Example: synthesize sorting algorithms from spec
 
 ### 4.3 Theorem Proving Assistant
 - [ ] **Interactive proof search**: Implement tactics for Lean / Coq in Rusty
 - [ ] **Proof strategy macros**: High-level proof patterns as Lisp macros
-- **Deliverable:** Rusty-powered proof assistant that can assist in formal mathematics
+- **Deliverable:** Rusty-powered proof assistant for formal mathematics
 
 ### 4.4 Robotics / Autonomous Systems
 - [ ] **Deterministic task execution**: Timing-aware execution guarantees for control loops
@@ -146,9 +138,6 @@ In 5 years, Rusty will be:
 
 ### 5.3 Community & Advocacy
 - [ ] **Flagship projects**: 2-3 open-source projects that showcase Rusty's power
-  - Example: Formal verification tool for smart contracts
-  - Example: Physics simulator with symbolic reasoning layer
-  - Example: Multi-agent reasoning system for scientific discovery
 - [ ] **Academic partnerships**: Collaborate with universities on AI/formal methods research
 - [ ] **Production deployments**: Deploy Rusty in 1-2 companies' critical systems
 - **Deliverable:** Recognition as a serious tool for symbolic AI
@@ -159,10 +148,10 @@ In 5 years, Rusty will be:
 
 | Phase | Timeline | Key Deliverable | Success Metric |
 |-------|----------|-----------------|----------------|
-| 1 | Q1–Q4 2025 | Symbolic DSL + code generation | Rusty-generated code ≥ PyTorch performance on benchmarks |
+| 1 | Q1–Q4 2025 | Symbolic DSL + code generation | Rusty-generated code ≥ PyTorch performance |
 | 2 | Q1–Q2 2026 | Formal verification integration | Tool specifications verified via Lean |
-| 3 | Q3–Q4 2026 | ML infrastructure integration | End-to-end PyTorch + Rusty pipeline published |
-| 4 | Q1–Q4 2027 | Killer app libraries | Symbolic regression / proof synthesis outperform SOTA |
+| 3 | Q3–Q4 2026 | ML infrastructure integration | End-to-end PyTorch + Rusty pipeline |
+| 4 | Q1–Q4 2027 | Killer app libraries | Symbolic regression outperforms SOTA |
 | 5 | Q1 2028+ | Maturity | v1.0.0 release, 10+ production users |
 
 ---
@@ -170,51 +159,22 @@ In 5 years, Rusty will be:
 ## Near-Term Action Items (Next 3 Months)
 
 ### Immediate (This Sprint)
-- [ ] Complete `ARCHITECTURE.md` documenting evaluator, macro system, tool registry
+- [ ] Complete ARCHITECTURE.md documenting evaluator and macro system
 - [ ] Write 3 macro examples showing code generation potential
-- [ ] Benchmark current macro performance; identify optimization targets
-- [ ] Set up CI/CD pipeline with performance regression detection
+- [ ] Benchmark current macro performance
+- [ ] Set up CI/CD with performance regression detection
 
 ### Next Sprint (Month 2)
 - [ ] Implement compile-time evaluation (`eval-when`)
-- [ ] Build first symbolic differentiation macro (autodiff)
+- [ ] Build first symbolic differentiation macro
 - [ ] Create computation graph IR prototype
 - [ ] Publish benchmark comparison vs. PyTorch
 
 ### Sprint 3 (Month 3)
-- [ ] Finalize graph optimization passes (const folding, DCE)
+- [ ] Finalize graph optimization passes
 - [ ] Begin neuro-symbolic bridge library design
-- [ ] Integrate with simple ML framework (numpy-based)
-- [ ] Write user-facing tutorial: "Building a DSL in Rusty"
-
----
-
-## Success Criteria
-
-### For Phase 1
-✅ Rusty macros can generate code equivalent to hand-written Rust  
-✅ Symbolic differentiation works for polynomial and trigonometric functions  
-✅ Performance parity with JAX on small graphs  
-
-### For Phase 2
-✅ Lean verification of tool specifications working  
-✅ Type checker catches common agent errors  
-✅ Safety proofs generated for agent chains  
-
-### For Phase 3
-✅ Zero-copy tensor interop with PyTorch  
-✅ Multi-agent system orchestrating symbolically  
-✅ 10x speedup on agent execution vs. baseline  
-
-### For Phase 4
-✅ Symbolic regression library outperforms PySR on benchmarks  
-✅ Sketch-based synthesis can fill simple program holes  
-✅ Rusty-powered proof assistant published  
-
-### For Phase 5
-✅ v1.0.0 released with stable ABI  
-✅ Package manager with 20+ published libraries  
-✅ 3+ flagship projects in production or widely adopted  
+- [ ] Integrate with simple ML framework
+- [ ] Write user-facing tutorial
 
 ---
 
@@ -232,45 +192,19 @@ In 5 years, Rusty will be:
 - Need: +1 formal methods specialist (Lean interop, verification)
 
 ### Phase 3+ (Target: v0.5–1.0)
-- Need: Small team (3–5) focused on ML integration, performance
+- Need: Small team (3–5) for ML integration and performance
 
 ---
 
 ## Open Questions & Research Areas
 
 1. **How to best represent computation graphs in Lisp?**
-   - Current: Nested s-expressions. Explore: DAG data structure? Separate IR?
-
 2. **Can we achieve production-grade safety without dependent types?**
-   - Current: Optional gradual typing. Explore: Refinement types? Liquid types?
-
 3. **What's the right abstraction for agent memory persistence?**
-   - Current: History replay. Explore: Persistent data structures? Write-ahead logs?
-
 4. **How to make Rusty visible to the broader AI/ML community?**
-   - Strategy: Papers, blog posts, conference talks
-   - Target venues: PLDI, ICML workshops, OSDI for production systems
 
 ---
 
-## Related Work & Inspiration
-
-- **PySR** (symbolic regression with genetic programming)
-- **TVM** / **XLA** (graph compilation and optimization)
-- **Lean** / **Coq** (formal verification)
-- **Racket** (Lisp with macro power; influenced DSL ecosystem)
-- **Lispy** (small Lisp proving practical symbolic computing)
-- **Scheme/R6RS** (practical Lisp standard)
-
----
-
-## Contributing
-
-The Rusty roadmap is a living document. Contributions, feedback, and feature requests are welcome. For major changes, please open an issue or discussion.
-
----
-
-**Last updated:** July 2026  
-**Status:** On track — Phase 1 in progress
+**Last updated:** July 2026 | **Status:** On track — Phase 1 in progress
 
 🦀 *In memory of the brother who inspired this journey.*
