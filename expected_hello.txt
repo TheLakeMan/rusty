@@ -1,6 +1,2 @@
-🦀 Rusty v0.10.0 — A Lisp in Rust
-   In memory of my brother.
-   Type (help) or 'quit' to exit.
-
 Hello, SimpleLisp v2.2!
 (Welcome Leader)

@@ -10,10 +10,6 @@ use interp::{make_env, run_code, print_repr};
 use rustyline::DefaultEditor;
 
 fn main() {
-    println!("🦀 Rusty v0.10.0 — A Lisp in Rust");
-    println!("   In memory of my brother.");
-    println!("   Type (help) or 'quit' to exit.\n");
-
     let global = make_env();
     let eval   = Evaluator::new();
 
@@ -31,6 +27,9 @@ fn main() {
     }
 
     // REPL
+    println!("🦀 Rusty v0.10.0 — A Lisp in Rust");
+    println!("   In memory of my brother.");
+    println!("   Type (help) or 'quit' to exit.\n");
     let mut rl = DefaultEditor::new().unwrap();
     let mut buffer = String::new();
 
