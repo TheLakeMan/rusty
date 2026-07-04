@@ -495,8 +495,71 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
-    // ── Tool predicate ────────────────────────────────────────────────────
-    b!("tool?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tool{..})))));
+    // ── Native file I/O (no shell needed) ────────────────────────────────
+    b!("file-read", |args| {
+        match args.first() {
+            Some(Value::String(path)) => {
+                std::fs::read_to_string(path)
+                    .map(Value::String)
+                    .map_err(|e| format!("file-read: {}", e))
+            }
+            _ => Err("file-read: expected a path string".into()),
+        }
+    });
+    b!("file-write", |args| {
+        if args.len() < 2 { return Err("file-write: (file-write path content)".into()); }
+        match (&args[0], &args[1]) {
+            (Value::String(path), Value::String(content)) => {
+                std::fs::write(path, content)
+                    .map(|_| Value::String(format!("Written: {}", path)))
+                    .map_err(|e| format!("file-write: {}", e))
+            }
+            _ => Err("file-write: expected (path content) strings".into()),
+        }
+    });
+    b!("file-append", |args| {
+        if args.len() < 2 { return Err("file-append: (file-append path content)".into()); }
+        match (&args[0], &args[1]) {
+            (Value::String(path), Value::String(content)) => {
+                use std::io::Write;
+                std::fs::OpenOptions::new().append(true).create(true).open(path)
+                    .and_then(|mut f| f.write_all(content.as_bytes()))
+                    .map(|_| Value::String(format!("Appended: {}", path)))
+                    .map_err(|e| format!("file-append: {}", e))
+            }
+            _ => Err("file-append: expected (path content) strings".into()),
+        }
+    });
+    b!("file-exists?", |args| {
+        match args.first() {
+            Some(Value::String(path)) => Ok(Value::Bool(std::path::Path::new(path).exists())),
+            _ => Err("file-exists?: expected a path string".into()),
+        }
+    });
+    b!("dir-create", |args| {
+        match args.first() {
+            Some(Value::String(path)) => {
+                std::fs::create_dir_all(path)
+                    .map(|_| Value::String(format!("Created: {}", path)))
+                    .map_err(|e| format!("dir-create: {}", e))
+            }
+            _ => Err("dir-create: expected a path string".into()),
+        }
+    });
+    b!("dir-list", |args| {
+        match args.first() {
+            Some(Value::String(path)) => {
+                let entries = std::fs::read_dir(path)
+                    .map_err(|e| format!("dir-list: {}", e))?;
+                let names: Vec<Value> = entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| Value::String(e.file_name().to_string_lossy().to_string()))
+                    .collect();
+                Ok(Value::List(names))
+            }
+            _ => Err("dir-list: expected a path string".into()),
+        }
+    });
     b!("nil",     |_| Ok(Value::Nil));
 
     // ── Help ──────────────────────────────────────────────────────────────
