@@ -216,19 +216,30 @@ impl Evaluator {
                                     }
                                 } else { 10 };
 
-                                // Build tool descriptions for system prompt
+                                // Build tool descriptions for system prompt — walk full env chain
                                 let mut tool_descs = String::new();
                                 {
-                                    let frame = env.borrow();
-                                    for (_, v) in &frame.vars {
-                                        if let Value::Tool { name, description, params, .. } = v {
-                                            tool_descs.push_str(&format!(
-                                                "- {}{}: {}\n",
-                                                name,
-                                                if params.is_empty() { String::new() }
-                                                else { format!("({})", params.join(", ")) },
-                                                description
-                                            ));
+                                    let mut scan_env = env.clone();
+                                    loop {
+                                        let frame = scan_env.borrow();
+                                        for (_, v) in &frame.vars {
+                                            if let Value::Tool { name, description, params, .. } = v {
+                                                if !tool_descs.contains(&format!("- {}", name)) {
+                                                    tool_descs.push_str(&format!(
+                                                        "- {}{}: {}\n",
+                                                        name,
+                                                        if params.is_empty() { String::new() }
+                                                        else { format!("({})", params.join(", ")) },
+                                                        description
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        let parent = frame.parent.clone();
+                                        drop(frame);
+                                        match parent {
+                                            Some(p) => scan_env = p,
+                                            None => break,
                                         }
                                     }
                                 }
