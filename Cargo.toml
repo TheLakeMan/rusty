@@ -1,26 +1,28 @@
 [package]
-name    = "rusty"
+name = "rusty"
 version = "0.10.0"
 edition = "2021"
+description = "A modern Lisp interpreter in Rust with TCO, macros, and AI agent capabilities"
 
-# Build both a binary (REPL/CLI) and a shared library (PyO3 bridge)
 [[bin]]
 name = "rusty"
 path = "src/main.rs"
 
 [lib]
-name      = "rusty"
+name = "rusty"
 crate-type = ["cdylib", "rlib"]
-path      = "src/lib.rs"
+path = "src/lib.rs"
 
 [dependencies]
 rustyline = "14.0"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
-[dependencies.pyo3]
-version  = "0.29"
-features = ["extension-module", "abi3-py311"]
+# Python bindings (optional)
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py311"], optional = true }
 
-[profile.release]
-opt-level = 3
-lto       = true
-codegen-units = 1
+[features]
+default = ["python"]
+python = ["dep:pyo3"]
