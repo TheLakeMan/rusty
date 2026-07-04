@@ -324,7 +324,7 @@ pub fn setup_builtins(env: &Env) {
     b!("list?",      |args| Ok(Value::Bool(matches!(args.first(), Some(Value::List(_))|Some(Value::Nil)))));
     b!("pair?",      |args| Ok(Value::Bool(matches!(args.first(), Some(Value::List(v)) if !v.is_empty()))));
     b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
-        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})))));
+        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})|Some(Value::Tool{..})))));
     b!("macro?",     |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Macro{..})))));
     b!("type-of",    |args| Ok(Value::Symbol(match args.first() {
         Some(Value::Number(_))   => "number",
@@ -336,6 +336,7 @@ pub fn setup_builtins(env: &Env) {
         Some(Value::Builtin(..)) => "builtin",
         Some(Value::Lambda{..})  => "lambda",
         Some(Value::Macro{..})   => "macro",
+        Some(Value::Tool{..})    => "tool",
         None                     => "nil",
     }.to_string())));
 
@@ -472,6 +473,30 @@ pub fn setup_builtins(env: &Env) {
     b!("print",   |args| { let parts: Vec<String>=args.iter().map(print_repr).collect(); println!("{}",parts.join(" ")); Ok(Value::Nil) });
     b!("println", |args| { let parts: Vec<String>=args.iter().map(print_repr).collect(); println!("{}",parts.join(" ")); Ok(Value::Nil) });
     b!("error",   |args| { Err(args.iter().map(|v| print_repr(v)).collect::<Vec<_>>().join(" ")) });
+
+    // ── System / shell ────────────────────────────────────────────────────
+    b!("shell", |args| {
+        if args.is_empty() { return Err("shell: needs a command string".into()); }
+        let cmd = match &args[0] {
+            Value::String(s) => s.clone(),
+            other => format!("{}", other),
+        };
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&cmd)
+            .output()
+            .map_err(|e| format!("shell: {}", e))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !output.status.success() && !stderr.is_empty() {
+            Ok(Value::String(format!("{}{}", stdout, stderr)))
+        } else {
+            Ok(Value::String(stdout))
+        }
+    });
+
+    // ── Tool predicate ────────────────────────────────────────────────────
+    b!("tool?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tool{..})))));
     b!("nil",     |_| Ok(Value::Nil));
 
     // ── Help ──────────────────────────────────────────────────────────────
