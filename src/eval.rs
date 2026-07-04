@@ -1,10 +1,66 @@
 use crate::parser::Expr;
 use crate::env::{Env, EnvFrame, Value};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct ChatRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    temperature: f32,
+    max_tokens: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct ChatChoice {
+    message: ChatMessage,
+}
+
+#[derive(Deserialize)]
+struct ChatResponse {
+    choices: Vec<ChatChoice>,
+}
 
 pub struct Evaluator;
 
 impl Evaluator {
     pub fn new() -> Self { Evaluator }
+
+    // ── LLM Builtin ───────────────────────────────────────────────────────
+    async fn call_llm(prompt: &str, temperature: f32, max_tokens: Option<u32>) -> Result<String, String> {
+        let client = Client::new();
+
+        let request = ChatRequest {
+            model: "local".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
+            temperature,
+            max_tokens,
+        };
+
+        let response = client
+            .post("http://localhost:8080/v1/chat/completions")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .json::<ChatResponse>()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        response.choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| "No response from LLM".to_string())
+    }
 
     pub fn eval_all(&self, ast: &[Expr], env: &Env) -> Result<Value, String> {
         let mut result = Value::Nil;
@@ -31,156 +87,221 @@ impl Evaluator {
                 Expr::List(list) => {
                     if list.is_empty() { return Ok(Value::Nil); }
 
-                    // ── Special forms ──
                     if let Expr::Symbol(head) = &list[0] {
                         match head.as_str() {
 
-                            "quote" => {
-                                if list.len() != 2 { return Err("quote: expects 1 arg".into()); }
-                                return Ok(expr_to_value(&list[1]));
-                            }
-
-                            "quasiquote" => {
-                                if list.len() != 2 { return Err("quasiquote: expects 1 arg".into()); }
-                                return self.expand_quasiquote(&list[1], &env);
-                            }
-
-                            "if" => {
-                                if list.len() < 3 || list.len() > 4 {
-                                    return Err("if: (if test then [else])".into());
+                            // ── LLM Call ─────────────────────────────────
+                            "llm" => {
+                                if list.len() < 2 {
+                                    return Err("(llm prompt [temperature] [max-tokens])".into());
                                 }
-                                let test = self.eval(&list[1], &env)?;
-                                cur = if is_truthy(&test) {
-                                    list[2].clone()
-                                } else if list.len() == 4 {
-                                    list[3].clone()
-                                } else {
-                                    return Ok(Value::Nil);
+                                let prompt = match self.eval(&list[1], &env)? {
+                                    Value::String(s) => s,
+                                    _ => return Err("llm: prompt must be a string".into()),
                                 };
-                                continue;
+                                let temp = if list.len() > 2 {
+                                    match self.eval(&list[2], &env)? {
+                                        Value::Number(n) => n as f32,
+                                        _ => 0.7,
+                                    }
+                                } else { 0.7 };
+                                let max_t = if list.len() > 3 {
+                                    match self.eval(&list[3], &env)? {
+                                        Value::Number(n) => Some(n as u32),
+                                        _ => None,
+                                    }
+                                } else { None };
+
+                                let result = tokio::runtime::Runtime::new()
+                                    .unwrap()
+                                    .block_on(Self::call_llm(&prompt, temp, max_t));
+
+                                return result.map(Value::String);
                             }
 
-                            "cond" => {
-                                let mut tail = None;
-                                for clause in &list[1..] {
-                                    if let Expr::List(c) = clause {
-                                        if c.is_empty() { continue; }
-                                        let is_else = matches!(&c[0], Expr::Symbol(s) if s == "else");
-                                        let test = if is_else { Value::Bool(true) }
-                                                   else { self.eval(&c[0], &env)? };
-                                        if is_truthy(&test) {
-                                            if c.len() == 1 { return Ok(test); }
-                                            let last = c.len() - 1;
-                                            for e in &c[1..last] { self.eval(e, &env)?; }
-                                            tail = Some(c[last].clone());
-                                            break;
-                                        }
-                                    } else { return Err("cond: clause must be a list".into()); }
-                                }
-                                match tail { Some(t) => { cur = t; continue; } None => return Ok(Value::Nil) }
-                            }
-
-                            "and" => {
-                                if list.len() == 1 { return Ok(Value::Bool(true)); }
-                                let last = list.len() - 1;
-                                for e in &list[1..last] {
-                                    if !is_truthy(&self.eval(e, &env)?) { return Ok(Value::Bool(false)); }
-                                }
-                                cur = list[last].clone(); continue;
-                            }
-
-                            "or" => {
-                                if list.len() == 1 { return Ok(Value::Bool(false)); }
-                                let last = list.len() - 1;
-                                for e in &list[1..last] {
-                                    let v = self.eval(e, &env)?;
-                                    if is_truthy(&v) { return Ok(v); }
-                                }
-                                cur = list[last].clone(); continue;
-                            }
-
-                            "define" => return self.eval_define(list, &env),
-                            "def"    => return self.eval_def(list, &env),
-
-                            "defmacro" => {
-                                // (defmacro name (params) body...)
+                            // ── deftool ───────────────────────────────────
+                            "deftool" => {
                                 if list.len() < 4 {
-                                    return Err("defmacro: (defmacro name (params) body...)".into());
+                                    return Err("deftool: (deftool name (params) \"description\" body...)".into());
                                 }
-                                let name = sym_name(&list[1], "defmacro")?;
-                                let (params, rest) = match &list[2] {
-                                    Expr::List(ps) => parse_params(ps)?,
-                                    _ => return Err("defmacro: params must be a list".into()),
+                                let name = sym_name(&list[1], "deftool")?;
+                                let params = match &list[2] {
+                                    Expr::List(ps) => ps.iter().map(|p| sym_name(p, "deftool param"))
+                                        .collect::<Result<Vec<_>, _>>()?,
+                                    _ => return Err("deftool: params must be a list".into()),
                                 };
-                                let body = list[3..].to_vec();
-                                EnvFrame::set(&env, name,
-                                    Value::Macro { params, rest, body, env: env.clone() });
+                                let description = match self.eval(&list[3], &env)? {
+                                    Value::String(s) => s,
+                                    _ => return Err("deftool: description must be a string".into()),
+                                };
+                                let body = list[4..].to_vec();
+                                EnvFrame::set(&env, name.clone(), Value::Tool {
+                                    name, description, params, body, env: env.clone(),
+                                });
                                 return Ok(Value::Nil);
                             }
 
-                            "set!" => {
-                                if list.len() != 3 { return Err("set!: (set! name val)".into()); }
-                                let name = sym_name(&list[1], "set!")?;
-                                let val = self.eval(&list[2], &env)?;
-                                if !EnvFrame::set_existing(&env, &name, val) {
-                                    return Err(format!("set!: unbound '{}'", name));
+                            // ── tool-call ─────────────────────────────────
+                            "tool-call" => {
+                                if list.len() < 2 {
+                                    return Err("tool-call: (tool-call \"name\" args...)".into());
                                 }
-                                return Ok(Value::Nil);
-                            }
-
-                            "set" => {
-                                if list.len() != 3 { return Err("set: (set name val)".into()); }
-                                let name = sym_name(&list[1], "set")?;
-                                let val = self.eval(&list[2], &env)?;
-                                if !EnvFrame::set_existing(&env, &name, val.clone()) {
-                                    EnvFrame::set(&env, name, val);
+                                let name = match self.eval(&list[1], &env)? {
+                                    Value::String(s) => s,
+                                    Value::Symbol(s) => s,
+                                    _ => return Err("tool-call: name must be a string".into()),
+                                };
+                                let args: Result<Vec<Value>, _> = list[2..]
+                                    .iter().map(|a| self.eval(a, &env)).collect();
+                                let args = args?;
+                                match EnvFrame::get(&env, &name) {
+                                    Some(Value::Tool { params, body, env: tenv, .. }) => {
+                                        let child = EnvFrame::new(Some(tenv.clone()));
+                                        for (p, a) in params.iter().zip(args.iter()) {
+                                            EnvFrame::set(&child, p.clone(), a.clone());
+                                        }
+                                        let last = body.len() - 1;
+                                        for e in &body[..last] { self.eval(e, &child)?; }
+                                        return self.eval(&body[last], &child);
+                                    }
+                                    Some(Value::Builtin(_, f)) => return f(&args),
+                                    Some(Value::Lambda { params, rest, body, env: lenv }) => {
+                                        let child = EnvFrame::extend(&lenv, &params, &rest, args)?;
+                                        let last = body.len() - 1;
+                                        for e in &body[..last] { self.eval(e, &child)?; }
+                                        return self.eval(&body[last], &child);
+                                    }
+                                    _ => return Err(format!("Unknown tool: {}", name)),
                                 }
-                                return Ok(Value::Nil);
                             }
 
-                            "lambda" => return self.eval_lambda(list, &env),
-
-                            "begin" => {
-                                if list.len() == 1 { return Ok(Value::Nil); }
-                                let last = list.len() - 1;
-                                for e in &list[1..last] { self.eval(e, &env)?; }
-                                cur = list[last].clone(); continue;
+                            // ── list-tools ─────────────────────────────────
+                            "list-tools" => {
+                                let mut tools = Vec::new();
+                                fn collect_tools(env: &Env, out: &mut Vec<Value>) {
+                                    let frame = env.borrow();
+                                    for (name, v) in &frame.vars {
+                                        if let Value::Tool { description, params, .. } = v {
+                                            out.push(Value::List(vec![
+                                                Value::Symbol(name.clone()),
+                                                Value::String(description.clone()),
+                                                Value::List(params.iter().map(|p| Value::Symbol(p.clone())).collect()),
+                                            ]));
+                                        }
+                                    }
+                                    if let Some(ref parent) = frame.parent {
+                                        collect_tools(parent, out);
+                                    }
+                                }
+                                collect_tools(&env, &mut tools);
+                                return Ok(Value::List(tools));
                             }
 
-                            "let" => {
-                                // Named let: (let name ((var init)...) body...)
-                                if list.len() >= 4 {
-                                    if let Expr::Symbol(loop_name) = &list[1] {
-                                        if let Expr::List(_) = &list[2] {
-                                            let (body, child) = self.eval_named_let(loop_name, list, &env)?;
-                                            env = child; cur = body; continue;
+                            // ── react-loop goal max-steps) ────────────────────
+                            // ReAct: Reason → Act → Observe loop
+                            // The LLM reasons about which tool to call,
+                            // Rusty executes it, result feeds back to LLM.
+                            "react-loop" => {
+                                if list.len() < 2 {
+                                    return Err("react-loop: (react-loop goal [max-steps])".into());
+                                }
+                                let goal = match self.eval(&list[1], &env)? {
+                                    Value::String(s) => s,
+                                    other => format!("{}", other),
+                                };
+                                let max_steps = if list.len() > 2 {
+                                    match self.eval(&list[2], &env)? {
+                                        Value::Number(n) => n as usize,
+                                        _ => 10,
+                                    }
+                                } else { 10 };
+
+                                // Build tool descriptions for system prompt
+                                let mut tool_descs = String::new();
+                                {
+                                    let frame = env.borrow();
+                                    for (_, v) in &frame.vars {
+                                        if let Value::Tool { name, description, params, .. } = v {
+                                            tool_descs.push_str(&format!(
+                                                "- {}{}: {}\n",
+                                                name,
+                                                if params.is_empty() { String::new() }
+                                                else { format!("({})", params.join(", ")) },
+                                                description
+                                            ));
                                         }
                                     }
                                 }
-                                let (body, child) = self.eval_let(list, &env)?;
-                                env = child; cur = body; continue;
+
+                                let system = format!(
+                                    "You are an AI agent. Complete the goal using available tools.\n\
+                                     Available tools:\n{}\n\
+                                     To use a tool, respond with:\n\
+                                     ACTION: tool-name\nINPUT: argument\n\n\
+                                     When done, respond with:\n\
+                                     FINAL: your answer",
+                                    tool_descs
+                                );
+
+                                let mut history = format!("Goal: {}\n", goal);
+                                let mut last_result = Value::Nil;
+
+                                for step in 0..max_steps {
+                                    let prompt = format!("{}\nStep {}:", history, step + 1);
+                                    let full_prompt = format!("{}\n\n{}", system, prompt);
+
+                                    let response = tokio::runtime::Runtime::new()
+                                        .unwrap()
+                                        .block_on(Self::call_llm(&full_prompt, 0.3, Some(200)));
+
+                                    let response = match response {
+                                        Ok(r) => r,
+                                        Err(e) => return Err(format!("react-loop: LLM error: {}", e)),
+                                    };
+
+                                    // Parse ACTION / FINAL from response
+                                    if response.contains("FINAL:") {
+                                        if let Some(ans) = response.split("FINAL:").nth(1) {
+                                            last_result = Value::String(ans.trim().to_string());
+                                            break;
+                                        }
+                                    } else if response.contains("ACTION:") {
+                                        let action = response.split("ACTION:").nth(1)
+                                            .unwrap_or("").lines().next().unwrap_or("").trim();
+                                        let input = response.split("INPUT:").nth(1)
+                                            .unwrap_or("").lines().next().unwrap_or("").trim();
+
+                                        // Try to call the tool
+                                        let obs = match EnvFrame::get(&env, action) {
+                                            Some(Value::Tool { params, body, env: tenv, .. }) => {
+                                                let child = EnvFrame::new(Some(tenv.clone()));
+                                                if !params.is_empty() {
+                                                    EnvFrame::set(&child, params[0].clone(),
+                                                        Value::String(input.to_string()));
+                                                }
+                                                let last = body.len() - 1;
+                                                for e in &body[..last] { let _ = self.eval(e, &child); }
+                                                match self.eval(&body[last], &child) {
+                                                    Ok(v) => format!("{}", v),
+                                                    Err(e) => format!("Error: {}", e),
+                                                }
+                                            }
+                                            _ => format!("Unknown tool: {}", action),
+                                        };
+
+                                        history.push_str(&format!(
+                                            "\nStep {}: ACTION={} INPUT={}\nOBSERVATION: {}\n",
+                                            step + 1, action, input, obs
+                                        ));
+                                        last_result = Value::String(obs);
+                                    } else {
+                                        // Pure reasoning step
+                                        history.push_str(&format!("\nThought: {}\n", response.trim()));
+                                    }
+                                }
+
+                                return Ok(last_result);
                             }
-
-                            "let*"   => { let (b,c) = self.eval_let_star(list, &env)?; env=c; cur=b; continue; }
-                            "letrec" => { let (b,c) = self.eval_letrec(list, &env)?;   env=c; cur=b; continue; }
-
-                            "when" => {
-                                if list.len() < 3 { return Err("when: (when test body...)".into()); }
-                                if !is_truthy(&self.eval(&list[1], &env)?) { return Ok(Value::Nil); }
-                                let last = list.len() - 1;
-                                for e in &list[2..last] { self.eval(e, &env)?; }
-                                cur = list[last].clone(); continue;
-                            }
-
-                            "unless" => {
-                                if list.len() < 3 { return Err("unless: (unless test body...)".into()); }
-                                if is_truthy(&self.eval(&list[1], &env)?) { return Ok(Value::Nil); }
-                                let last = list.len() - 1;
-                                for e in &list[2..last] { self.eval(e, &env)?; }
-                                cur = list[last].clone(); continue;
-                            }
-
-                            "do" => return self.eval_do(list, &env),
 
                             // ── (load "file.lisp") ──────────────────────
                             "load" | "load-relative" => {
@@ -257,6 +378,161 @@ impl Evaluator {
                                     None => return Err(format!("match: no clause matched {}", subject)),
                                 }
                             }
+
+                            // ── Quote / Quasiquote ────────────────────────
+                            "quote" => {
+                                if list.len() != 2 { return Err("quote: expects 1 arg".into()); }
+                                return Ok(expr_to_value(&list[1]));
+                            }
+
+                            "quasiquote" => {
+                                if list.len() != 2 { return Err("quasiquote: expects 1 arg".into()); }
+                                return self.expand_quasiquote(&list[1], &env);
+                            }
+
+                            // ── Conditionals ──────────────────────────────
+                            "if" => {
+                                if list.len() < 3 { return Err("if: (if test then [else])".into()); }
+                                let test_val = self.eval(&list[1], &env)?;
+                                if is_truthy(&test_val) {
+                                    cur = list[2].clone();
+                                } else if list.len() > 3 {
+                                    cur = list[3].clone();
+                                } else {
+                                    return Ok(Value::Nil);
+                                }
+                                continue;
+                            }
+
+                            "when" => {
+                                if list.len() < 3 { return Err("when: (when test body...)".into()); }
+                                let test_val = self.eval(&list[1], &env)?;
+                                if is_truthy(&test_val) {
+                                    let last = list.len() - 1;
+                                    for e in &list[2..last] { self.eval(e, &env)?; }
+                                    cur = list[last].clone(); continue;
+                                }
+                                return Ok(Value::Nil);
+                            }
+
+                            "unless" => {
+                                if list.len() < 3 { return Err("unless: (unless test body...)".into()); }
+                                let test_val = self.eval(&list[1], &env)?;
+                                if !is_truthy(&test_val) {
+                                    let last = list.len() - 1;
+                                    for e in &list[2..last] { self.eval(e, &env)?; }
+                                    cur = list[last].clone(); continue;
+                                }
+                                return Ok(Value::Nil);
+                            }
+
+                            "cond" => {
+                                let mut found: Option<Expr> = None;
+                                'cond: for clause in &list[1..] {
+                                    if let Expr::List(c) = clause {
+                                        if c.is_empty() { continue; }
+                                        let is_else = matches!(&c[0], Expr::Symbol(s) if s == "else");
+                                        let test_val = if is_else { Value::Bool(true) } else { self.eval(&c[0], &env)? };
+                                        if is_truthy(&test_val) {
+                                            if c.len() == 1 { return Ok(test_val); }
+                                            let last = c.len() - 1;
+                                            for e in &c[1..last] { self.eval(e, &env)?; }
+                                            found = Some(c[last].clone());
+                                            break 'cond;
+                                        }
+                                    }
+                                }
+                                match found {
+                                    Some(e) => { cur = e; continue; }
+                                    None    => return Ok(Value::Nil),
+                                }
+                            }
+
+                            // ── Boolean short-circuit ─────────────────────
+                            "and" => {
+                                if list.len() == 1 { return Ok(Value::Bool(true)); }
+                                let last = list.len() - 1;
+                                for e in &list[1..last] {
+                                    let v = self.eval(e, &env)?;
+                                    if !is_truthy(&v) { return Ok(v); }
+                                }
+                                cur = list[last].clone(); continue;
+                            }
+
+                            "or" => {
+                                if list.len() == 1 { return Ok(Value::Bool(false)); }
+                                let last = list.len() - 1;
+                                for e in &list[1..last] {
+                                    let v = self.eval(e, &env)?;
+                                    if is_truthy(&v) { return Ok(v); }
+                                }
+                                cur = list[last].clone(); continue;
+                            }
+
+                            // ── Sequencing ────────────────────────────────
+                            "begin" => {
+                                if list.len() == 1 { return Ok(Value::Nil); }
+                                let last = list.len() - 1;
+                                for e in &list[1..last] { self.eval(e, &env)?; }
+                                cur = list[last].clone(); continue;
+                            }
+
+                            // ── Definitions ───────────────────────────────
+                            "define" => { return self.eval_define(list, &env); }
+                            "def"    => { return self.eval_def(list, &env); }
+
+                            "set!" => {
+                                if list.len() != 3 { return Err("set!: (set! name value)".into()); }
+                                let name = sym_name(&list[1], "set!")?;
+                                let val  = self.eval(&list[2], &env)?;
+                                if !EnvFrame::set_existing(&env, &name, val) {
+                                    return Err(format!("set!: undefined variable '{}'", name));
+                                }
+                                return Ok(Value::Nil);
+                            }
+
+                            // ── Lambdas ───────────────────────────────────
+                            "lambda" | "fn" | "λ" => { return self.eval_lambda(list, &env); }
+
+                            // ── Macros ────────────────────────────────────
+                            "defmacro" | "define-macro" => {
+                                if list.len() < 4 { return Err("defmacro: (defmacro name (params) body...)".into()); }
+                                let name = sym_name(&list[1], "defmacro")?;
+                                let (params, rest) = match &list[2] {
+                                    Expr::List(ps) => parse_params(ps)?,
+                                    _ => return Err("defmacro: params must be a list".into()),
+                                };
+                                let body = list[3..].to_vec();
+                                EnvFrame::set(&env, name, Value::Macro { params, rest, body, env: env.clone() });
+                                return Ok(Value::Nil);
+                            }
+
+                            // ── Let forms ─────────────────────────────────
+                            "let" => {
+                                // Named let: (let loop ((var val)...) body...)
+                                if list.len() > 2 {
+                                    if let Expr::Symbol(lname) = &list[1] {
+                                        let lname = lname.clone();
+                                        let (e, new_env) = self.eval_named_let(&lname, list, &env)?;
+                                        cur = e; env = new_env; continue;
+                                    }
+                                }
+                                let (e, new_env) = self.eval_let(list, &env)?;
+                                cur = e; env = new_env; continue;
+                            }
+
+                            "let*" => {
+                                let (e, new_env) = self.eval_let_star(list, &env)?;
+                                cur = e; env = new_env; continue;
+                            }
+
+                            "letrec" | "letrec*" => {
+                                let (e, new_env) = self.eval_letrec(list, &env)?;
+                                cur = e; env = new_env; continue;
+                            }
+
+                            // ── Do loop ───────────────────────────────────
+                            "do" => { return self.eval_do(list, &env); }
 
                             _ => {} // fall through to macro / function call
                         }
