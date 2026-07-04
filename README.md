@@ -6,6 +6,18 @@ A complete, feature-rich Lisp interpreter implemented in Rust with first-class s
 
 ---
 
+## 🎯 Vision: The Symbolic Transformation Layer for AI/ML
+
+Rusty is the language you reach for when you need **computation that reasons about computation**:
+
+- **LLM as creative planner** — Generate high-level strategies
+- **Rusty as reliable executor** — Deterministically execute with symbolic reasoning
+- **Verifiable agents** — Prove correctness using formal methods
+
+[→ **See the full 5-year roadmap →**](./ROADMAP.md)
+
+---
+
 ## Quick Start
 
 ```bash
@@ -51,6 +63,8 @@ Source (.lisp) or REPL input
 | `src/lib.rs` | Python bindings via PyO3 — `Rusty`, `RustySession`, `rusty.eval()` |
 | `agent.lisp` | 10 filesystem + shell + LLM tools, ReAct agent loop |
 | `std.lisp` | Standard library — 230+ lines of Lisp utilities |
+
+[→ **Deep dive: Full architecture guide →**](./ARCHITECTURE.md)
 
 ---
 
@@ -374,15 +388,38 @@ cargo run -- hello.lisp
 
 ---
 
-## Vision
+## 5-Year Roadmap
 
-> *"Rusty as the symbolic transformation layer for AI/ML infrastructure."*
+### Phase 1 (Q1–Q4 2025): Symbolic Transformation Layer
+Build macro DSLs for computation graph generation and optimization. Generate code on par with PyTorch.
 
-The 5-year direction: make Rusty the language people reach for when they need computation that reasons about computation — LLM as creative planner, Rusty as reliable executor with memory, tools, and rules.
+### Phase 2 (Q1–Q2 2026): Verifiable AI Systems
+Integrate formal verification (Lean/Coq). Prove tool correctness. Add gradual typing.
 
-- **Neuro-symbolic bridge**: embed logical constraints alongside neural computation
-- **Composable agent tools**: `deftool` as a first-class primitive, not an afterthought  
-- **Verifiable AI systems**: Lisp's homoiconicity makes it natural to reason about the programs you're generating
+### Phase 3 (Q3–Q4 2026): Production ML Integration
+Zero-copy tensor interop with PyTorch/JAX. Multi-agent coordination. 10x performance.
+
+### Phase 4 (Q1–Q4 2027): Ecosystem & Libraries
+Killer apps: symbolic regression, proof synthesis, robot control. Package manager.
+
+### Phase 5 (Q1 2028+): Maturity
+v1.0.0 release. IDE support, LSP, debugger. Production deployments.
+
+**[→ Read the full roadmap →](./ROADMAP.md)**
+
+---
+
+## Contributing
+
+Rusty welcomes contributions! Areas of interest:
+
+- **Performance optimization** — Reduce cloning, implement copy-on-write
+- **Macro system** — New examples, DSL patterns
+- **Python bridge** — More bindings, better interop
+- **Documentation** — Tutorials, examples, API docs
+- **Tests** — Coverage, edge cases, property-based testing
+
+See [ROADMAP.md](./ROADMAP.md) for planned features and [ARCHITECTURE.md](./ARCHITECTURE.md) for deep-dive technical design.
 
 ---
 
