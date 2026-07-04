@@ -491,6 +491,17 @@ impl Evaluator {
                                 return Ok(Value::Nil);
                             }
 
+                            // Legacy SimpleLisp alias — creates variable if not yet defined
+                            "set" => {
+                                if list.len() != 3 { return Err("set: (set name value)".into()); }
+                                let name = sym_name(&list[1], "set")?;
+                                let val  = self.eval(&list[2], &env)?;
+                                if !EnvFrame::set_existing(&env, &name, val.clone()) {
+                                    EnvFrame::set(&env, name, val);
+                                }
+                                return Ok(Value::Nil);
+                            }
+
                             // ── Lambdas ───────────────────────────────────
                             "lambda" | "fn" | "λ" => { return self.eval_lambda(list, &env); }
 
