@@ -27,6 +27,14 @@ pub enum Value {
         body:   Vec<Expr>,
         env:    Env,
     },
+    /// Tool for agent use
+    Tool {
+        name: String,
+        description: String,
+        params: Vec<String>,
+        body: Vec<Expr>,
+        env: Env,
+    },
     Nil,
 }
 
@@ -59,6 +67,7 @@ impl std::fmt::Display for Value {
                 if let Some(r) = rest { write!(f, " . {}", r)?; }
                 write!(f, ")>")
             }
+            Value::Tool { name, .. } => write!(f, "#<tool:{}>", name),
             Value::Nil => write!(f, "()"),
         }
     }
@@ -69,8 +78,8 @@ pub type Env = Rc<RefCell<EnvFrame>>;
 
 #[derive(Debug)]
 pub struct EnvFrame {
-    vars:   HashMap<String, Value>,
-    parent: Option<Env>,
+    pub vars:   HashMap<String, Value>,   // made public for now
+    pub parent: Option<Env>,
 }
 
 impl EnvFrame {
