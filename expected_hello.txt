@@ -1,2 +1,2 @@
-Hello, SimpleLisp v2.2!
-(Welcome Leader)
+Hello, Rusty v0.10.0!
+Welcome Leader

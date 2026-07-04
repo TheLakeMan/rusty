@@ -1,2 +1,2 @@
-(print "Hello, SimpleLisp v2.2!")
-(let ((name "Leader")) (print (list "Welcome" name)))
+(println "Hello, Rusty v0.10.0!")
+(let ((name "Leader")) (println (string-append "Welcome " name)))
