@@ -1,14 +1,13 @@
 # Rusty — A Modern Lisp in Rust
 
-A complete, feature-rich Lisp interpreter implemented in Rust, ported from a Python prototype. Designed for **AI scripting**, **game logic**, and **symbolic reasoning** with first-class support for tail-call optimization, hygienic macros, and closures.
+A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.9.2 | **Status:** Production-ready REPL, full core language support
+**Version:** 0.10.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
 ## Quick Start
 
-### Build & Run
 ```bash
 # Build
 cargo build --release
@@ -18,396 +17,372 @@ cargo run
 
 # Run a Lisp file
 cargo run -- path/to/script.lisp
-```
 
-### Hello, Rusty
-```lisp
-(print "Hello, Rusty!")
-(def add-nums (x y) (+ x y))
-(print (add-nums 5 3))
-```
+# Run the agent demo
+cargo run -- agent.lisp
 
----
-
-## Language Features
-
-### Core Language
-- **Lexical Scoping & Closures** — Full closure capture with lexical environments
-- **Tail Call Optimization (TCO)** — Stack-safe recursion via explicit loop
-- **Hygienic Macros** — `defmacro` with proper variable hygiene
-- **Quasiquote & Unquote** — Template-based meta-programming (`` ` ,, ,@ ``)
-- **First-class Functions** — `lambda`, `define`, `def`, `apply`
-- **Pattern Recognition** — `quote`, `cond`, `match`-like constructs
-
-### Control Flow
-```lisp
-(if test then-expr else-expr)
-(cond (test1 expr1) (test2 expr2) (else expr3))
-(and a b c)
-(or a b c)
-(when test body...)
-(unless test body...)
-(begin e1 e2 ... en)
-(do ((var init step)...) (test result...) body...)
-```
-
-### Data Binding
-```lisp
-(define x 42)                          ; bind x
-(def square (n) (* n n))              ; define function
-(set! x 43)                            ; mutate existing binding
-(set x 44)                             ; create or update
-(let ((x 1) (y 2)) (+ x y))           ; local bindings, evaluated in outer scope
-(let* ((x 1) (y (+ x 1))) y)          ; sequential, each sees previous
-(letrec ((f (lambda (n) ...))) ...)    ; recursive, sees self
-(lambda (x y . rest) body...)          ; rest parameters
-```
-
-### Arithmetic (Scheme-style + SimpleLisp aliases)
-```lisp
-(+ 1 2 3)        ; addition (also: add)
-(- 5 2)          ; subtraction (also: sub)
-(* 3 4)          ; multiplication (also: mul)
-(/ 10 2)         ; division (also: div)
-(mod 10 3)       ; modulo
-(expt 2 8)       ; exponentiation
-(abs -5)         ; absolute value
-(sqrt 16)        ; square root
-(floor 3.7)      ; floor
-(ceiling 3.2)    ; ceiling
-(round 3.5)      ; round
-(max 1 5 3)      ; maximum
-(min 1 5 3)      ; minimum
-(gcd 12 8)       ; greatest common divisor
-```
-
-### Comparisons (Scheme-style + SimpleLisp aliases)
-```lisp
-(= 3 3)          ; numeric equality (also: eq for all types)
-(< 3 5)          ; less than (also: lt)
-(> 5 3)          ; greater than (also: gt)
-(<= 3 3)         ; less-or-equal (also: le)
-(>= 3 3)         ; greater-or-equal (also: ge)
-(/= 3 4)         ; not-equal
-(not #f)         ; logical NOT → #t
-(zero? 0)        ; is zero?
-(positive? 5)    ; is positive?
-(negative? -3)   ; is negative?
-(odd? 5)         ; is odd?
-(even? 4)        ; is even?
-```
-
-### Lists (Immutable)
-```lisp
-(list 1 2 3)                           ; construct list
-(cons 0 '(1 2))                        ; prepend element
-(car '(1 2 3))                         ; head (1)
-(cdr '(1 2 3))                         ; tail ((2 3))
-(length '(1 2 3))                      ; length (3)
-(append '(1 2) '(3 4))                 ; concat ((1 2 3 4))
-(reverse '(1 2 3))                     ; reverse ((3 2 1))
-(nth '(a b c) 1)                       ; index (b)
-(member 2 '(1 2 3))                    ; membership check (#t)
-(list-tail '(1 2 3) 1)                 ; skip n ((2 3))
-
-; List predicates
-(null? '())                            ; empty?
-(pair? '(1))                           ; non-empty list?
-(list? '(1 2))                         ; is a list?
-```
-
-### Higher-Order Functions
-```lisp
-(map (lambda (x) (* x 2)) '(1 2 3))    ; ((2 4 6))
-(filter (lambda (x) (> x 2)) '(1 2 3)); ((3))
-(foldl (lambda (acc x) (+ acc x)) 0 '(1 2 3))  ; left fold (6)
-(foldr (lambda (x acc) (+ x acc)) 0 '(1 2 3))  ; right fold (6)
-(for-each (lambda (x) (print x)) '(1 2 3))     ; iterate (side effects)
-(apply + '(1 2 3))                     ; call with arg list (6)
-```
-
-### Strings
-```lisp
-(string-length "hello")                ; length (5)
-(string-append "hello" " " "world")    ; concat ("hello world")
-(substring "hello" 1 4)                ; slice ("ell")
-(string-ref "hello" 0)                 ; char at index ("h")
-(string=? "a" "a")                     ; equality (#t)
-(number->string 42)                    ; convert ("42")
-(string->number "42")                  ; parse (42 or #f)
-(symbol->string 'x)                    ; symbol to string ("x")
-(string->symbol "x")                   ; string to symbol (x)
-(string->list "ab")                    ; explode (("a" "b"))
-```
-
-### Type Predicates
-```lisp
-(number? 42)                           ; is number?
-(string? "hello")                      ; is string?
-(boolean? #t)                          ; is boolean?
-(symbol? 'x)                           ; is symbol?
-(list? '(1 2))                         ; is list?
-(procedure? (lambda (x) x))            ; is callable?
-(nil? '())                             ; is nil/empty?
-```
-
-### I/O
-```lisp
-(print "hello" 42 x)                   ; print with spaces, newline
-(display "no newline")                 ; no newline
-(newline)                              ; print newline
-(error "message")                      ; raise error
-```
-
-### Macros (Hygienic)
-```lisp
-(defmacro inc (x)
-  `(+ ,x 1))
-
-(inc 5)  ; → 6
-
-(defmacro when (test body)
-  `(if ,test (begin ,@body)))
-
-(when (> x 5)
-  (print "big")
-  (set! x 0))
+# Python bridge
+maturin develop
+python3 -c "import rusty; print(rusty.eval('(+ 1 2)'))"
 ```
 
 ---
 
 ## Architecture
 
-### How Rusty Works
-
 ```
-Source Code (.lisp file or REPL input)
-    ↓ [Lexer: src/lexer.rs]
-Tokens (LParen, Symbol, Number, String, etc.)
-    ↓ [Parser: src/parser.rs]
-AST (Expr enum: Number, Symbol, List, etc.)
-    ↓ [Evaluator: src/eval.rs + TCO Loop]
-Value (Number, String, Lambda, List, etc.)
-    ↓ [Environment: src/env.rs]
-Lexical scopes, closures, mutations
+Source (.lisp) or REPL input
+    ↓  src/lexer.rs       — tokenizer
+    ↓  src/parser.rs      — S-expression parser  
+    ↓  src/eval.rs        — evaluator, TCO loop, special forms, LLM + tool builtins
+    ↓  src/env.rs         — lexical environments, closures
+    ↓  src/interp.rs      — builtins, stdlib loader, shared core
+    ↓  src/lib.rs         — PyO3 Python bindings
+    ↓  src/main.rs        — REPL, file runner
 ```
 
 ### Key Files
 
-| File | Purpose | Lines |
-|------|---------|-------|
-| **src/main.rs** | REPL, 100+ builtins, I/O | 568 |
-| **src/eval.rs** | Evaluator, TCO loop, special forms | 483 |
-| **src/env.rs** | Environment frames, scoping | 121 |
-| **src/parser.rs** | S-expression parser | 79 |
-| **src/lexer.rs** | Tokenizer | 105 |
-
-### Tail Call Optimization
-
-Rusty implements TCO via an explicit **trampoline loop** in the evaluator:
-
-```rust
-pub fn eval(&self, expr: &Expr, env: &Env) -> Result<Value, String> {
-    let mut cur = expr.clone();
-    let mut env = env.clone();
-    
-    loop {
-        match &cur {
-            // Base cases return immediately
-            Expr::Number(n) => return Ok(Value::Number(*n)),
-            
-            // Control flow (if, begin, etc.) continue the loop
-            // instead of recursing — this avoids stack growth
-            Expr::List(list) => {
-                if let Expr::Symbol(head) = &list[0] {
-                    if head == "if" {
-                        cur = if_branch;  // Continue loop, don't recurse
-                        continue;
-                    }
-                }
-                // Function call: tail position handled by loop too
-                let func = self.eval(&list[0], &env)?;
-                match func {
-                    Value::Lambda { body, .. } => {
-                        cur = body[last];  // Continue loop
-                        env = child_env;
-                        continue;  // ← Key: avoids recursion
-                    }
-                }
-            }
-        }
-    }
-}
-```
-
-This enables **stack-safe recursion** for arbitrary depth:
-```lisp
-(def sum-to (n acc)
-  (if (<= n 0)
-      acc
-      (sum-to (- n 1) (+ acc n))))
-
-(sum-to 1000000 0)  ; Works! No stack overflow.
-```
-
-### Lexical Scoping & Closures
-
-Environments are **immutable linked lists** (via `Rc<RefCell<EnvFrame>>`):
-
-```rust
-pub enum Value {
-    Lambda {
-        params: Vec<String>,
-        rest: Option<String>,
-        body: Vec<Expr>,
-        env: Env,  // ← Captures closure environment
-    }
-}
-```
-
-Example:
-```lisp
-(def make-counter ()
-  (let ((x 0))
-    (lambda ()
-      (set! x (+ x 1))
-      x)))
-
-(def counter (make-counter))
-(counter)  ; → 1
-(counter)  ; → 2
-```
-
-The lambda captures the `let` environment, including `x`. Mutations via `set!` affect the captured cell.
-
-### Hygienic Macros
-
-Macros receive **unevaluated arguments** and expand into new AST, which is then evaluated:
-
-```lisp
-(defmacro when (test body)
-  `(if ,test (begin ,@body)))
-
-(when (> x 5)
-  (print "big"))
-  
-; Expands to:
-; (if (> x 5) (begin (print "big")))
-```
-
-Hygiene is preserved because macro variables live in their **definition environment**, not the call site.
+| File | Purpose |
+|------|---------|
+| `src/eval.rs` | Evaluator — TCO loop, special forms, `deftool`, `react-loop`, `llm` |
+| `src/interp.rs` | 60+ builtins, stdlib loader, JSON, shell, format |
+| `src/env.rs` | Environment frames — `Value` enum including `Tool`, `Lambda`, `Macro` |
+| `src/lib.rs` | Python bindings via PyO3 — `Rusty`, `RustySession`, `rusty.eval()` |
+| `agent.lisp` | 10 filesystem + shell + LLM tools, ReAct agent loop |
+| `std.lisp` | Standard library — 230+ lines of Lisp utilities |
 
 ---
 
-## Examples
+## AI Agent System
 
-### Recursive Factorial (with TCO)
-```lisp
-(def fact (n acc)
-  (if (<= n 1)
-      acc
-      (fact (- n 1) (* acc n))))
+Rusty is designed as the **symbolic execution layer** for local AI agents:
 
-(fact 5 1)  ; → 120
+```
+LLM (planner)     → decides what to do
+Rusty (executor)  → deterministically does it
 ```
 
-### Map & Filter
-```lisp
-(def double (x) (* x 2))
-(map double '(1 2 3))  ; → (2 4 6)
+### deftool — Register Agent Tools
 
-(filter (lambda (x) (> x 2)) '(1 2 3))  ; → (3)
+```lisp
+(deftool create-dir (path)
+  "Create a directory at the given path"
+  (shell (format "mkdir -p ~a" path)))
+
+(deftool read-file (path)
+  "Read file contents"
+  (shell (format "cat ~a" path)))
+
+(deftool ask-llm (prompt)
+  "Query the local LLM"
+  (llm prompt 0.7 500))
 ```
 
-### Closures & Mutable Cells
-```lisp
-(def make-adder (n)
-  (lambda (x) (+ x n)))
+### tool-call — Execute Tools
 
-(def add5 (make-adder 5))
-(add5 10)  ; → 15
+```lisp
+; Direct tool invocation
+(tool-call "create-dir" "my-project")
+(tool-call "write-file" "my-project/README.md" "# Hello from Rusty!")
+(tool-call "read-file" "my-project/README.md")
+(tool-call "list-dir" "my-project")
+(tool-call "file-exists" "my-project/README.md")
+(tool-call "ask-llm" "What is machine learning?")
 ```
 
-### Macro: Assert
-```lisp
-(defmacro assert (condition)
-  `(if (not ,condition)
-       (error "Assertion failed")))
+### list-tools — Inspect Registry
 
-(assert (= 2 2))  ; OK
-(assert (= 2 3))  ; Error
+```lisp
+(list-tools)
+; => ((create-dir ("path") "Create a directory...")
+;     (write-file ("path" "content") "Write content...")
+;     ...)
+
+(show-tools)   ; Pretty-print all registered tools
 ```
 
-### Game AI Example (Pseudocode)
+### react-loop — Autonomous Agent
+
 ```lisp
-(def evaluate-move (game-state move)
-  (let* ((result (apply-move game-state move))
-         (score (evaluate-board result)))
-    (if (> score 100)
-        (print "Good move!")
-        (print "Weak move."))))
+; Load tools then run the ReAct loop
+(load "agent.lisp")
+(agent "Create a folder called notes with an index.md file")
+```
+
+The ReAct loop:
+1. Sends goal + tool descriptions to the LLM
+2. Parses `ACTION:` / `INPUT:` / `FINAL:` from response
+3. Executes the tool call via Rusty (real system calls)
+4. Feeds `OBSERVATION:` back to LLM
+5. Repeats until `FINAL:` or max steps
+
+### llm — Direct LLM Access
+
+```lisp
+; Requires llama-server running on localhost:8080
+(llm "What is 2+2?" 0.7 100)
+(llm "Summarize this" 0.3 500)
+```
+
+Start a compatible server:
+```bash
+# With llama.cpp
+llama-server -m /path/to/model.gguf --port 8080
+
+# With Hyperion
+~/hyperion/build/model_server /path/to/model.gguf
+# then wrap with an OpenAI-compatible proxy
+```
+
+---
+
+## Built-in Tools (agent.lisp)
+
+| Tool | Args | Description |
+|------|------|-------------|
+| `create-dir` | `path` | Create directory (mkdir -p) |
+| `write-file` | `path content` | Write content to file |
+| `append-file` | `path content` | Append content to file |
+| `read-file` | `path` | Read file contents |
+| `list-dir` | `path` | List directory (ls -la) |
+| `delete-file` | `path` | Delete a file |
+| `file-exists` | `path` | Check if path exists → bool |
+| `shell-run` | `command` | Run any shell command |
+| `ask-llm` | `prompt` | Query local LLM |
+| `search-files` | `pattern` | grep -r in current directory |
+
+---
+
+## Python Bridge
+
+```python
+import rusty
+
+# One-shot eval
+print(rusty.eval("(+ 1 2)"))                    # "3"
+print(rusty.eval("(->> '(1 2 3) (filter odd?) (map square) sum)"))  # "35"
+
+# Stateless instance
+r = rusty.Rusty()
+print(r.eval("(json-encode (list (list \"x\" 42)))"))  # {"x": 42}
+
+# Stateful session — definitions persist across calls
+s = rusty.RustySession()
+s.eval("(define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))")
+print(s.eval("(fact 10)"))   # 3628800
+```
+
+Build the Python package:
+```bash
+maturin develop        # install into active venv
+maturin build          # build wheel for distribution
+```
+
+---
+
+## Language Reference
+
+### Core Special Forms
+
+```lisp
+(define x 42)                          ; bind
+(define (f x y) (+ x y))              ; define function
+(def f (x y) (+ x y))                 ; SimpleLisp-style define
+(set! x 43)                            ; mutate existing
+(set x 44)                             ; create or mutate
+(lambda (x y . rest) body...)          ; anonymous function
+(if test then else)                    ; conditional
+(cond (test expr)... (else expr))      ; multi-branch
+(and a b c) (or a b c)                ; short-circuit logic
+(when test body...) (unless test body...)
+(begin e1 e2 ... en)                   ; sequence
+(let ((x 1) (y 2)) body...)           ; local bindings
+(let* ((x 1) (y (+ x 1))) body...)    ; sequential let
+(letrec ((f (lambda (n) ...))) body...) ; recursive let
+(let loop ((i 0)) body... (loop (+ i 1)))  ; named let / loop
+(do ((var init step)...) (test result...) body...)  ; do loop
+(quote x) 'x                          ; literal data
+(quasiquote x) `x  ,splice  ,@splice  ; template / unquote
+```
+
+### Macros
+
+```lisp
+(defmacro my-when (test . body)
+  `(if ,test (begin ,@body) ()))
+
+(defmacro swap! (a b)
+  (let ((tmp (gensym "tmp")))
+    `(let ((,tmp ,a)) (set! ,a ,b) (set! ,b ,tmp))))
+
+(gensym "prefix")    ; unique symbol for hygienic macros
+```
+
+### Agent / Tool Forms
+
+```lisp
+(deftool name (params) "description" body...)
+(tool-call "name" arg...)
+(list-tools)
+(react-loop goal max-steps)
+(llm prompt temperature max-tokens)
+(shell "command")
+```
+
+### Error Handling
+
+```lisp
+(try-catch
+  (/ 1 0)
+  (e) (format "Caught: ~a" e))
+```
+
+### Pattern Matching
+
+```lisp
+(match value
+  (("ok" v)    (format "got: ~a" v))
+  (("err" e)   (format "error: ~a" e))
+  ((_ . rest)  (format "list: ~a" rest))
+  (_           "unknown"))
+```
+
+### File Loading
+
+```lisp
+(load "tools.lisp")
+(load-relative "utils.lisp")
+```
+
+### Arithmetic & Math
+
+```lisp
++ - * / mod expt abs sqrt floor ceiling round max min gcd
+; Aliases: add sub mul div
+```
+
+### Comparison
+
+```lisp
+= < > <= >= eq? equal? not zero? positive? negative? odd? even?
+; Aliases: eq gt lt ge le neq
+```
+
+### Lists
+
+```lisp
+cons car cdr list null? pair? list? length append reverse
+nth member list-tail map filter foldl foldr for-each apply
+; From std.lisp: zip take drop range iota flatten any? all?
+; partition find remove-duplicates zip-with
+```
+
+### Strings
+
+```lisp
+string-length string-append string-append-list substring
+string-ref string=? number->string string->number
+symbol->string string->symbol string->list str
+format    ; (format "~a + ~a = ~a" 1 2 3)  →  "1 + 2 = 3"
+          ; ~a = any, ~s = quoted, ~% = newline, ~~ = tilde
+string-join string-repeat string-contains? string-starts-with?
+```
+
+### JSON
+
+```lisp
+(json-encode (list (list "key" "val")))   ; → "{\"key\": \"val\"}"
+(json-decode "{\"x\": 42}")               ; → (("x" 42))
+```
+
+### Types
+
+```lisp
+number? string? boolean? symbol? list? procedure? macro? tool? nil?
+type-of    ; → symbol: number / string / boolean / lambda / tool / ...
+```
+
+### I/O
+
+```lisp
+(print x y z)      ; space-separated, with newline
+(println x)        ; alias for print
+(display x)        ; no newline, strings unquoted
+(newline)
+(error "msg")
+```
+
+### Standard Library (std.lisp, auto-loaded)
+
+```lisp
+; Math
+square cube inc dec average clamp sign
+
+; Lists  
+last flatten zip zip-with take drop take-while drop-while
+range iota sum product any? all? none? count find find-index
+partition remove-duplicates flatten1 interleave
+
+; Association lists
+assoc assq alist-get record-set make-record get-field
+(field key record)   ; accessor macro
+
+; Functional
+compose curry identity const flip negate memoize
+map* filter* foldl*  ; pipeline-friendly (list-first)
+
+; Threading macros
+(-> x (f a) (g b))    ; thread first
+(->> x (f a) (g b))   ; thread last
+
+; Loop macros
+(dotimes (i 10) body...)
+(dolist (x lst) body...)
+(while test body...)
+(repeat n body...)
+
+; Assertions
+(assert condition "message")
+```
+
+---
+
+## Tail Call Optimization
+
+Rusty implements TCO via an explicit trampoline loop — stack-safe recursion to arbitrary depth:
+
+```lisp
+(define (sum-to n acc)
+  (if (<= n 0) acc
+      (sum-to (- n 1) (+ acc n))))
+
+(sum-to 1000000 0)   ; no stack overflow
 ```
 
 ---
 
 ## Testing
 
-Run the test suite:
 ```bash
 ./run_tests.sh
+# or individually:
+cargo run -- tests.lisp
+cargo run -- new-features.lisp
+cargo run -- hello.lisp
 ```
 
-This executes `tests.lisp` and `new-features.lisp` against the Rust implementation and compares with expected output.
-
-Test files:
-- **tests.lisp** — Core functionality (arithmetic, lists, closures, recursion)
-- **new-features.lisp** — Advanced features (let forms, letrec, type predicates)
-- **hello.lisp** — Simple example
-
 ---
 
-## Use Cases
+## Vision
 
-### ✅ Ideal For
-- **AI Agent Scripting** — Decision trees, reasoning logic, prompt composition
-- **Game Logic** — State machines, dialogue, NPC behavior
-- **Symbolic Reasoning** — Pattern matching, constraint solving, knowledge representation
-- **Meta-programming** — DSLs via macros, code generation
-- **Prototyping** — Fast iteration on logic before optimization
+> *"Rusty as the symbolic transformation layer for AI/ML infrastructure."*
 
-### ⚠️ Not Ideal For
-- Neural network inference (no tensor ops; consider embedding this in a Python/Rust ML framework)
-- Large-scale numerical computation (single-threaded, no SIMD)
-- Systems programming (use Rust directly)
+The 5-year direction: make Rusty the language people reach for when they need computation that reasons about computation — LLM as creative planner, Rusty as reliable executor with memory, tools, and rules.
 
----
-
-## Roadmap
-
-### Planned Features
-- [ ] **Exception Handling** — `try`/`catch`/`finally` for graceful error recovery
-- [ ] **Module System** — Namespace support, `(module name exports)`
-- [ ] **Pattern Matching** — Enhanced `match` construct for destructuring
-- [ ] **Mutable Data Structures** — Hash tables, vectors with efficient mutation
-- [ ] **Lazy Evaluation** — `delay`/`force` for infinite sequences
-- [ ] **Object System** — `defclass`, `make-instance`, method dispatch
-- [ ] **String Interpolation** — Lisp-native template syntax for prompt building
-
-### Performance Optimizations
-- Bytecode compilation (currently AST-interpreted)
-- JIT compilation for hot paths
-- Garbage collection tuning
-
----
-
-## Contributing
-
-Contributions welcome! See `CONTRIBUTING.md` for guidelines.
-
-To add a new builtin:
-1. Add to `setup_builtins()` in `src/main.rs`
-2. Add tests to `new-features.lisp` or `tests.lisp`
-3. Document in README
+- **Neuro-symbolic bridge**: embed logical constraints alongside neural computation
+- **Composable agent tools**: `deftool` as a first-class primitive, not an afterthought  
+- **Verifiable AI systems**: Lisp's homoiconicity makes it natural to reason about the programs you're generating
 
 ---
 
@@ -415,15 +390,4 @@ To add a new builtin:
 
 MIT
 
----
-
-## Inspiration
-
-- **Scheme** — TCO, lexical scoping, hygienic macros
-- **Python** — SimpleLisp prototype (original author)
-- **Common Lisp** — Rich standard library
-- **Rust** — Safe, performant implementation language
-
-Built for **AI, games, and symbolic reasoning**. Built in **Rust**.
-
-🦀 _In memory of the brother who inspired this journey._
+🦀 *In memory of the brother who inspired this journey.*
