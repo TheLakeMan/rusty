@@ -27,7 +27,7 @@ fn main() {
     }
 
     // REPL
-    println!("🦀 Rusty v0.10.0 — A Lisp in Rust");
+    println!("☯ Rusty v0.10.0 — A Lisp in Rust");
     println!("   In memory of my brother.");
     println!("   Type (help) or 'quit' to exit.\n");
     let mut rl = DefaultEditor::new().unwrap();
