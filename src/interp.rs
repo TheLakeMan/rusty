@@ -510,6 +510,13 @@ pub fn setup_builtins(env: &Env) {
         if args.len() < 2 { return Err("file-write: (file-write path content)".into()); }
         match (&args[0], &args[1]) {
             (Value::String(path), Value::String(content)) => {
+                // Auto-create parent directories
+                if let Some(parent) = std::path::Path::new(path).parent() {
+                    if !parent.as_os_str().is_empty() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|e| format!("file-write: cannot create dir: {}", e))?;
+                    }
+                }
                 std::fs::write(path, content)
                     .map(|_| Value::String(format!("Written: {}", path)))
                     .map_err(|e| format!("file-write: {}", e))

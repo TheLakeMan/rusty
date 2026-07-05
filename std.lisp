@@ -231,3 +231,7 @@
   (when (not condition)
     (error (string-append "Assertion failed: " msg))))
 
+;; ── Agent tools ────────────────────────────────────────────────────────────
+(try-catch
+  (load "agent.lisp")
+  (e) ())   ; silently skip if not found

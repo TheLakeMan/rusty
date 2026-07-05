@@ -245,12 +245,19 @@ impl Evaluator {
                                 }
 
                                 let system = format!(
-                                    "You are an AI agent. Complete the goal using available tools.\n\
+                                    "You are an AI agent. Complete the goal step by step using the available tools.\n\
+                                     IMPORTANT: Always create directories before writing files inside them.\n\
                                      Available tools:\n{}\n\
-                                     To use a tool, respond with:\n\
-                                     ACTION: tool-name\nINPUT: argument\n\n\
-                                     When done, respond with:\n\
-                                     FINAL: your answer",
+                                     To call a single-arg tool:\n\
+                                     ACTION: tool-name\nINPUT: value\n\n\
+                                     To call a multi-arg tool, use JSON:\n\
+                                     ACTION: tool-name\nINPUT: {{\"arg1\": \"val1\", \"arg2\": \"val2\"}}\n\n\
+                                     Example for creating a file in a new folder:\n\
+                                     ACTION: create-dir\nINPUT: myfolder\n\
+                                     (wait for observation, then)\n\
+                                     ACTION: write-file\nINPUT: {{\"path\": \"myfolder/file.md\", \"content\": \"hello\"}}\n\n\
+                                     When the goal is fully complete respond with:\n\
+                                     FINAL: your summary",
                                     tool_descs
                                 );
 
@@ -263,7 +270,7 @@ impl Evaluator {
 
                                     let response = tokio::runtime::Runtime::new()
                                         .unwrap()
-                                        .block_on(Self::call_llm(&full_prompt, 0.3, Some(200)));
+                                        .block_on(Self::call_llm(&full_prompt, 0.3, Some(300)));
 
                                     let response = match response {
                                         Ok(r) => r,
@@ -278,21 +285,66 @@ impl Evaluator {
                                         }
                                     } else if response.contains("ACTION:") {
                                         let action = response.split("ACTION:").nth(1)
-                                            .unwrap_or("").lines().next().unwrap_or("").trim();
-                                        let input = response.split("INPUT:").nth(1)
-                                            .unwrap_or("").lines().next().unwrap_or("").trim();
+                                            .unwrap_or("").lines().next().unwrap_or("").trim()
+                                            .trim_matches('"').trim_matches('\'').to_string();
+                                        let input_raw = response.split("INPUT:").nth(1)
+                                            .unwrap_or("").lines().next().unwrap_or("").trim()
+                                            .trim_matches('"').trim_matches('\'').to_string();
 
-                                        // Try to call the tool
-                                        let obs = match EnvFrame::get(&env, action) {
+                                        // Execute the tool
+                                        let obs = match EnvFrame::get(&env, &action) {
                                             Some(Value::Tool { params, body, env: tenv, .. }) => {
                                                 let child = EnvFrame::new(Some(tenv.clone()));
-                                                if !params.is_empty() {
-                                                    EnvFrame::set(&child, params[0].clone(),
-                                                        Value::String(input.to_string()));
+
+                                                if params.len() <= 1 {
+                                                    // Single-arg: bind directly
+                                                    if let Some(p) = params.first() {
+                                                        EnvFrame::set(&child, p.clone(),
+                                                            Value::String(input_raw.clone()));
+                                                    }
+                                                } else {
+                                                    // Multi-arg: try JSON parse, else split by |
+                                                    let input_trim = input_raw.trim();
+                                                    if input_trim.starts_with('{') {
+                                                        // Parse JSON object {"param": "value", ...}
+                                                        if let Ok(parsed) = crate::interp::json_decode(input_trim) {
+                                                            if let Value::List(pairs) = parsed {
+                                                                for pair in pairs {
+                                                                    if let Value::List(kv) = pair {
+                                                                        if kv.len() == 2 {
+                                                                            if let Value::String(k) = &kv[0] {
+                                                                                EnvFrame::set(&child, k.clone(), kv[1].clone());
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    } else if input_trim.contains('|') {
+                                                        // Pipe-separated: "path|content"
+                                                        let parts: Vec<&str> = input_trim.splitn(params.len(), '|').collect();
+                                                        for (p, v) in params.iter().zip(parts.iter()) {
+                                                            EnvFrame::set(&child, p.clone(),
+                                                                Value::String(v.trim().to_string()));
+                                                        }
+                                                    } else {
+                                                        // Fallback: bind all params to the whole input
+                                                        for p in &params {
+                                                            EnvFrame::set(&child, p.clone(),
+                                                                Value::String(input_trim.to_string()));
+                                                        }
+                                                    }
                                                 }
+
                                                 let last = body.len() - 1;
                                                 for e in &body[..last] { let _ = self.eval(e, &child); }
                                                 match self.eval(&body[last], &child) {
+                                                    Ok(v) => format!("{}", v),
+                                                    Err(e) => format!("Error: {}", e),
+                                                }
+                                            }
+                                            Some(Value::Builtin(_, f)) => {
+                                                match f(&[Value::String(input_raw.clone())]) {
                                                     Ok(v) => format!("{}", v),
                                                     Err(e) => format!("Error: {}", e),
                                                 }
@@ -302,7 +354,7 @@ impl Evaluator {
 
                                         history.push_str(&format!(
                                             "\nStep {}: ACTION={} INPUT={}\nOBSERVATION: {}\n",
-                                            step + 1, action, input, obs
+                                            step + 1, action, input_raw, obs
                                         ));
                                         last_result = Value::String(obs);
                                     } else {
