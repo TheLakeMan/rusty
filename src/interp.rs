@@ -39,6 +39,13 @@ pub fn make_env() -> Env {
     let eval = Evaluator::new();
     setup_builtins(&env);
     load_stdlib(&env, &eval);
+    // Auto-load memory if it exists
+    let mem = memory_path();
+    if mem.exists() {
+        if let Ok(code) = std::fs::read_to_string(&mem) {
+            let _ = run_code(&code, &env, &eval);
+        }
+    }
     env
 }
 
@@ -495,77 +502,98 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
-    // ── Native file I/O (no shell needed) ────────────────────────────────
-    b!("file-read", |args| {
-        match args.first() {
-            Some(Value::String(path)) => {
-                std::fs::read_to_string(path)
-                    .map(Value::String)
-                    .map_err(|e| format!("file-read: {}", e))
-            }
-            _ => Err("file-read: expected a path string".into()),
+    // ── Tool predicate ────────────────────────────────────────────────────
+    b!("tool?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tool{..})))));
+
+    // ── Memory system ─────────────────────────────────────────────────────
+    // Stored as ~/.rusty/memory.lisp — plain Lisp defines, human readable
+    b!("remember", |args| {
+        if args.len() < 2 { return Err("remember: (remember key value)".into()); }
+        let key = match &args[0] {
+            Value::String(s) | Value::Symbol(s) => s.clone(),
+            _ => return Err("remember: key must be a string or symbol".into()),
+        };
+        let val = &args[1];
+        let mem_path = memory_path();
+        // Read existing, remove old entry for this key, append new one
+        let existing = std::fs::read_to_string(&mem_path).unwrap_or_default();
+        let filtered: Vec<&str> = existing.lines()
+            .filter(|l| !l.contains(&format!("(define {} ", key)))
+            .collect();
+        let mut new_content = filtered.join("\n");
+        if !new_content.is_empty() && !new_content.ends_with('\n') {
+            new_content.push('\n');
         }
+        new_content.push_str(&format!("(define {} {})\n", key, val));
+        std::fs::create_dir_all(memory_dir())
+            .map_err(|e| format!("remember: cannot create memory dir: {}", e))?;
+        std::fs::write(&mem_path, &new_content)
+            .map_err(|e| format!("remember: {}", e))?;
+        Ok(Value::String(format!("Remembered: {} = {}", key, val)))
     });
-    b!("file-write", |args| {
-        if args.len() < 2 { return Err("file-write: (file-write path content)".into()); }
-        match (&args[0], &args[1]) {
-            (Value::String(path), Value::String(content)) => {
-                // Auto-create parent directories
-                if let Some(parent) = std::path::Path::new(path).parent() {
-                    if !parent.as_os_str().is_empty() {
-                        std::fs::create_dir_all(parent)
-                            .map_err(|e| format!("file-write: cannot create dir: {}", e))?;
-                    }
-                }
-                std::fs::write(path, content)
-                    .map(|_| Value::String(format!("Written: {}", path)))
-                    .map_err(|e| format!("file-write: {}", e))
+
+    b!("recall", |args| {
+        if args.is_empty() { return Err("recall: (recall key)".into()); }
+        let key = match &args[0] {
+            Value::String(s) | Value::Symbol(s) => s.clone(),
+            _ => return Err("recall: key must be a string or symbol".into()),
+        };
+        let mem_path = memory_path();
+        let content = std::fs::read_to_string(&mem_path).unwrap_or_default();
+        // Find the last define for this key
+        for line in content.lines().rev() {
+            let trimmed = line.trim();
+            let prefix = format!("(define {} ", key);
+            if trimmed.starts_with(&prefix) {
+                // Extract value — everything between prefix and last )
+                let val_str = &trimmed[prefix.len()..trimmed.len()-1];
+                // Parse as a Value — strip string quotes if present
+                let val = if val_str.starts_with('"') && val_str.ends_with('"') {
+                    Value::String(val_str[1..val_str.len()-1].to_string())
+                } else if val_str == "#t" {
+                    Value::Bool(true)
+                } else if val_str == "#f" {
+                    Value::Bool(false)
+                } else if let Ok(n) = val_str.parse::<f64>() {
+                    Value::Number(n)
+                } else {
+                    Value::String(val_str.to_string())
+                };
+                return Ok(val);
             }
-            _ => Err("file-write: expected (path content) strings".into()),
         }
+        Ok(Value::Nil)
     });
-    b!("file-append", |args| {
-        if args.len() < 2 { return Err("file-append: (file-append path content)".into()); }
-        match (&args[0], &args[1]) {
-            (Value::String(path), Value::String(content)) => {
-                use std::io::Write;
-                std::fs::OpenOptions::new().append(true).create(true).open(path)
-                    .and_then(|mut f| f.write_all(content.as_bytes()))
-                    .map(|_| Value::String(format!("Appended: {}", path)))
-                    .map_err(|e| format!("file-append: {}", e))
-            }
-            _ => Err("file-append: expected (path content) strings".into()),
-        }
+
+    b!("forget", |args| {
+        if args.is_empty() { return Err("forget: (forget key)".into()); }
+        let key = match &args[0] {
+            Value::String(s) | Value::Symbol(s) => s.clone(),
+            _ => return Err("forget: key must be string or symbol".into()),
+        };
+        let mem_path = memory_path();
+        let existing = std::fs::read_to_string(&mem_path).unwrap_or_default();
+        let filtered: String = existing.lines()
+            .filter(|l| !l.contains(&format!("(define {} ", key)))
+            .map(|l| format!("{}\n", l))
+            .collect();
+        std::fs::write(&mem_path, filtered)
+            .map_err(|e| format!("forget: {}", e))?;
+        Ok(Value::String(format!("Forgot: {}", key)))
     });
-    b!("file-exists?", |args| {
-        match args.first() {
-            Some(Value::String(path)) => Ok(Value::Bool(std::path::Path::new(path).exists())),
-            _ => Err("file-exists?: expected a path string".into()),
-        }
+
+    b!("memory-list", |_args| {
+        let mem_path = memory_path();
+        let content = std::fs::read_to_string(&mem_path).unwrap_or_default();
+        let entries: Vec<Value> = content.lines()
+            .filter(|l| l.trim().starts_with("(define "))
+            .map(|l| Value::String(l.trim().to_string()))
+            .collect();
+        Ok(Value::List(entries))
     });
-    b!("dir-create", |args| {
-        match args.first() {
-            Some(Value::String(path)) => {
-                std::fs::create_dir_all(path)
-                    .map(|_| Value::String(format!("Created: {}", path)))
-                    .map_err(|e| format!("dir-create: {}", e))
-            }
-            _ => Err("dir-create: expected a path string".into()),
-        }
-    });
-    b!("dir-list", |args| {
-        match args.first() {
-            Some(Value::String(path)) => {
-                let entries = std::fs::read_dir(path)
-                    .map_err(|e| format!("dir-list: {}", e))?;
-                let names: Vec<Value> = entries
-                    .filter_map(|e| e.ok())
-                    .map(|e| Value::String(e.file_name().to_string_lossy().to_string()))
-                    .collect();
-                Ok(Value::List(names))
-            }
-            _ => Err("dir-list: expected a path string".into()),
-        }
+
+    b!("memory-path", |_args| {
+        Ok(Value::String(memory_path().to_string_lossy().to_string()))
     });
     b!("nil",     |_| Ok(Value::Nil));
 
@@ -682,4 +710,15 @@ fn find_json_colon(s: &str) -> Option<usize> {
         if c==':'{return Some(i);}
     }
     None
+}
+
+// ── Memory helpers ────────────────────────────────────────────────────────
+
+fn memory_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home).join(".rusty")
+}
+
+fn memory_path() -> std::path::PathBuf {
+    memory_dir().join("memory.lisp")
 }

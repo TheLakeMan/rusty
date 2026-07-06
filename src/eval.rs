@@ -36,8 +36,14 @@ impl Evaluator {
     async fn call_llm(prompt: &str, temperature: f32, max_tokens: Option<u32>) -> Result<String, String> {
         let client = Client::new();
 
+        // Configurable via env vars — set in shell or via (shell "export RUSTY_MODEL=...")
+        let model = std::env::var("RUSTY_MODEL")
+            .unwrap_or_else(|_| "/home/thelakeman/workspace/models/Qwythos-9b/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf".to_string());
+        let url = std::env::var("RUSTY_LLM_URL")
+            .unwrap_or_else(|_| "http://localhost:8080/v1/chat/completions".to_string());
+
         let request = ChatRequest {
-            model: "local".to_string(),
+            model,
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: prompt.to_string(),
@@ -47,14 +53,14 @@ impl Evaluator {
         };
 
         let response = client
-            .post("http://localhost:8080/v1/chat/completions")
+            .post(&url)
             .json(&request)
             .send()
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("LLM connection failed (is llama-server running?): {}", e))?
             .json::<ChatResponse>()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("LLM response parse error: {}", e))?;
 
         response.choices
             .first()
@@ -216,48 +222,30 @@ impl Evaluator {
                                     }
                                 } else { 10 };
 
-                                // Build tool descriptions for system prompt — walk full env chain
+                                // Build tool descriptions for system prompt
                                 let mut tool_descs = String::new();
                                 {
-                                    let mut scan_env = env.clone();
-                                    loop {
-                                        let frame = scan_env.borrow();
-                                        for (_, v) in &frame.vars {
-                                            if let Value::Tool { name, description, params, .. } = v {
-                                                if !tool_descs.contains(&format!("- {}", name)) {
-                                                    tool_descs.push_str(&format!(
-                                                        "- {}{}: {}\n",
-                                                        name,
-                                                        if params.is_empty() { String::new() }
-                                                        else { format!("({})", params.join(", ")) },
-                                                        description
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                        let parent = frame.parent.clone();
-                                        drop(frame);
-                                        match parent {
-                                            Some(p) => scan_env = p,
-                                            None => break,
+                                    let frame = env.borrow();
+                                    for (_, v) in &frame.vars {
+                                        if let Value::Tool { name, description, params, .. } = v {
+                                            tool_descs.push_str(&format!(
+                                                "- {}{}: {}\n",
+                                                name,
+                                                if params.is_empty() { String::new() }
+                                                else { format!("({})", params.join(", ")) },
+                                                description
+                                            ));
                                         }
                                     }
                                 }
 
                                 let system = format!(
-                                    "You are an AI agent. Complete the goal step by step using the available tools.\n\
-                                     IMPORTANT: Always create directories before writing files inside them.\n\
+                                    "You are an AI agent. Complete the goal using available tools.\n\
                                      Available tools:\n{}\n\
-                                     To call a single-arg tool:\n\
-                                     ACTION: tool-name\nINPUT: value\n\n\
-                                     To call a multi-arg tool, use JSON:\n\
-                                     ACTION: tool-name\nINPUT: {{\"arg1\": \"val1\", \"arg2\": \"val2\"}}\n\n\
-                                     Example for creating a file in a new folder:\n\
-                                     ACTION: create-dir\nINPUT: myfolder\n\
-                                     (wait for observation, then)\n\
-                                     ACTION: write-file\nINPUT: {{\"path\": \"myfolder/file.md\", \"content\": \"hello\"}}\n\n\
-                                     When the goal is fully complete respond with:\n\
-                                     FINAL: your summary",
+                                     To use a tool, respond with:\n\
+                                     ACTION: tool-name\nINPUT: argument\n\n\
+                                     When done, respond with:\n\
+                                     FINAL: your answer",
                                     tool_descs
                                 );
 
@@ -270,7 +258,7 @@ impl Evaluator {
 
                                     let response = tokio::runtime::Runtime::new()
                                         .unwrap()
-                                        .block_on(Self::call_llm(&full_prompt, 0.3, Some(300)));
+                                        .block_on(Self::call_llm(&full_prompt, 0.3, Some(200)));
 
                                     let response = match response {
                                         Ok(r) => r,
@@ -285,66 +273,21 @@ impl Evaluator {
                                         }
                                     } else if response.contains("ACTION:") {
                                         let action = response.split("ACTION:").nth(1)
-                                            .unwrap_or("").lines().next().unwrap_or("").trim()
-                                            .trim_matches('"').trim_matches('\'').to_string();
-                                        let input_raw = response.split("INPUT:").nth(1)
-                                            .unwrap_or("").lines().next().unwrap_or("").trim()
-                                            .trim_matches('"').trim_matches('\'').to_string();
+                                            .unwrap_or("").lines().next().unwrap_or("").trim();
+                                        let input = response.split("INPUT:").nth(1)
+                                            .unwrap_or("").lines().next().unwrap_or("").trim();
 
-                                        // Execute the tool
-                                        let obs = match EnvFrame::get(&env, &action) {
+                                        // Try to call the tool
+                                        let obs = match EnvFrame::get(&env, action) {
                                             Some(Value::Tool { params, body, env: tenv, .. }) => {
                                                 let child = EnvFrame::new(Some(tenv.clone()));
-
-                                                if params.len() <= 1 {
-                                                    // Single-arg: bind directly
-                                                    if let Some(p) = params.first() {
-                                                        EnvFrame::set(&child, p.clone(),
-                                                            Value::String(input_raw.clone()));
-                                                    }
-                                                } else {
-                                                    // Multi-arg: try JSON parse, else split by |
-                                                    let input_trim = input_raw.trim();
-                                                    if input_trim.starts_with('{') {
-                                                        // Parse JSON object {"param": "value", ...}
-                                                        if let Ok(parsed) = crate::interp::json_decode(input_trim) {
-                                                            if let Value::List(pairs) = parsed {
-                                                                for pair in pairs {
-                                                                    if let Value::List(kv) = pair {
-                                                                        if kv.len() == 2 {
-                                                                            if let Value::String(k) = &kv[0] {
-                                                                                EnvFrame::set(&child, k.clone(), kv[1].clone());
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    } else if input_trim.contains('|') {
-                                                        // Pipe-separated: "path|content"
-                                                        let parts: Vec<&str> = input_trim.splitn(params.len(), '|').collect();
-                                                        for (p, v) in params.iter().zip(parts.iter()) {
-                                                            EnvFrame::set(&child, p.clone(),
-                                                                Value::String(v.trim().to_string()));
-                                                        }
-                                                    } else {
-                                                        // Fallback: bind all params to the whole input
-                                                        for p in &params {
-                                                            EnvFrame::set(&child, p.clone(),
-                                                                Value::String(input_trim.to_string()));
-                                                        }
-                                                    }
+                                                if !params.is_empty() {
+                                                    EnvFrame::set(&child, params[0].clone(),
+                                                        Value::String(input.to_string()));
                                                 }
-
                                                 let last = body.len() - 1;
                                                 for e in &body[..last] { let _ = self.eval(e, &child); }
                                                 match self.eval(&body[last], &child) {
-                                                    Ok(v) => format!("{}", v),
-                                                    Err(e) => format!("Error: {}", e),
-                                                }
-                                            }
-                                            Some(Value::Builtin(_, f)) => {
-                                                match f(&[Value::String(input_raw.clone())]) {
                                                     Ok(v) => format!("{}", v),
                                                     Err(e) => format!("Error: {}", e),
                                                 }
@@ -354,7 +297,7 @@ impl Evaluator {
 
                                         history.push_str(&format!(
                                             "\nStep {}: ACTION={} INPUT={}\nOBSERVATION: {}\n",
-                                            step + 1, action, input_raw, obs
+                                            step + 1, action, input, obs
                                         ));
                                         last_result = Value::String(obs);
                                     } else {
