@@ -18,8 +18,14 @@ struct ChatRequest {
 }
 
 #[derive(Deserialize)]
+struct ResponseMessage {
+    content: Option<String>,
+    reasoning_content: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct ChatChoice {
-    message: ChatMessage,
+    message: ResponseMessage,
 }
 
 #[derive(Deserialize)]
@@ -36,18 +42,19 @@ impl Evaluator {
     async fn call_llm(prompt: &str, temperature: f32, max_tokens: Option<u32>) -> Result<String, String> {
         let client = Client::new();
 
-        // Configurable via env vars — set in shell or via (shell "export RUSTY_MODEL=...")
         let model = std::env::var("RUSTY_MODEL")
             .unwrap_or_else(|_| "/home/thelakeman/workspace/models/Qwythos-9b/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf".to_string());
         let url = std::env::var("RUSTY_LLM_URL")
             .unwrap_or_else(|_| "http://localhost:8080/v1/chat/completions".to_string());
+        let system = std::env::var("RUSTY_SYSTEM")
+            .unwrap_or_else(|_| "You are a helpful AI assistant. Be concise and direct.".to_string());
 
         let request = ChatRequest {
             model,
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: prompt.to_string(),
-            }],
+            messages: vec![
+                ChatMessage { role: "system".to_string(), content: system },
+                ChatMessage { role: "user".to_string(),   content: prompt.to_string() },
+            ],
             temperature,
             max_tokens,
         };
@@ -62,9 +69,19 @@ impl Evaluator {
             .await
             .map_err(|e| format!("LLM response parse error: {}", e))?;
 
-        response.choices
-            .first()
-            .map(|c| c.message.content.clone())
+        response.choices.first()
+            .map(|c| {
+                // Use content if non-empty, fall back to reasoning_content
+                let content = c.message.content.as_deref().unwrap_or("").trim();
+                if !content.is_empty() {
+                    content.to_string()
+                } else {
+                    c.message.reasoning_content.clone()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string()
+                }
+            })
             .ok_or_else(|| "No response from LLM".to_string())
     }
 
