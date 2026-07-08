@@ -339,6 +339,11 @@
     (if hit (cadr hit) default)))
 
 (define (verify-candidate f spec)
+  (if (not (procedure? f))
+      (list (list 'not-a-function f))
+      (verify-candidate-checks f spec)))
+
+(define (verify-candidate-checks f spec)
   (let ((static-reasons '()))
     (when (spec-get spec 'pure #f)
       (let ((eff (check-effects f)))
@@ -362,16 +367,48 @@
                     (list (list 'counterexamples result))))
               'verified)))))
 
+;; A misbehaving proposer (LLM replying with prose, markdown fences, a
+;; define instead of a lambda, unparseable text...) must cost one attempt
+;; with feedback, never crash the loop — so both the proposal and its
+;; verification run inside try-catch.
 (define (synthesize-verified spec proposer max-attempts)
   (let loop ((attempt 1) (feedback '()))
     (if (> attempt max-attempts)
         (list 'failed (reverse feedback))
-        (let ((candidate (proposer attempt feedback)))
-          (let ((result (verify-candidate candidate spec)))
-            (if (equal? result 'verified)
-                (list 'verified candidate)
-                (loop (+ attempt 1)
-                      (cons (list attempt result) feedback))))))))
+        (let ((outcome
+                (try-catch
+                  (let ((candidate (proposer attempt feedback)))
+                    (let ((result (verify-candidate candidate spec)))
+                      (if (equal? result 'verified)
+                          (list 'ok candidate)
+                          (list 'rejected result))))
+                  (e) (list 'rejected (list (list 'error e))))))
+          (if (equal? (car outcome) 'ok)
+              (list 'verified (cadr outcome))
+              (loop (+ attempt 1)
+                    (cons (list attempt (cadr outcome)) feedback)))))))
+
+;; Pull the s-expression out of an LLM reply that may wrap it in markdown
+;; fences or prose: everything from the first "(" through the last ")".
+(define (string-first-index s ch)
+  (let ((n (string-length s)))
+    (let loop ((i 0))
+      (cond ((>= i n) #f)
+            ((equal? (string-ref s i) ch) i)
+            (else (loop (+ i 1)))))))
+
+(define (string-last-index s ch)
+  (let loop ((i (- (string-length s) 1)))
+    (cond ((< i 0) #f)
+          ((equal? (string-ref s i) ch) i)
+          (else (loop (- i 1))))))
+
+(define (extract-sexp text)
+  (let ((start (string-first-index text "("))
+        (end   (string-last-index text ")")))
+    (if (and start end (> end start))
+        (substring text start (+ end 1))
+        text)))
 
 ;; LLM-backed proposer (needs a llama-server-compatible endpoint running —
 ;; see the llm builtin). Generated text becomes a callable via eval-string;
@@ -379,12 +416,13 @@
 (define (llm-proposer task)
   (lambda (attempt feedback)
     (eval-string
-      (llm (string-append
-             "Write a single Rusty Lisp lambda for this task: " task
-             (if (null? feedback) ""
-                 (format "\nEarlier attempts failed verification: ~a" feedback))
-             "\nReply with ONLY the lambda s-expression, nothing else.")
-           0.2 300))))
+      (extract-sexp
+        (llm (string-append
+               "Write a single Rusty Lisp lambda for this task: " task
+               (if (null? feedback) ""
+                   (format "\nEarlier attempts failed verification: ~a" feedback))
+               "\nReply with ONLY the lambda s-expression, nothing else.")
+             0.2 300)))))
 
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
