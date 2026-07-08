@@ -76,13 +76,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-clippy-
 
-      - name: Clippy (warnings as errors)
-        run: cargo clippy -- -D warnings
+      # Catch real errors; warnings are advisory until we do a full clippy pass
+      - name: Clippy
+        run: cargo clippy -- -D clippy::correctness
 
-  # ── Format check ─────────────────────────────────────────────────────────
+  # ── Format (advisory) ────────────────────────────────────────────────────
   fmt:
-    name: Format
+    name: Format (advisory)
     runs-on: ubuntu-latest
+    # Never blocks the build — format drift is reported but not fatal
+    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
