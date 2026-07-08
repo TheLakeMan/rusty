@@ -7,6 +7,7 @@ mod arena;
 mod rust_jit;
 mod graph_ir;
 mod type_check;
+mod effect_check;
 
 use env::Value;
 use eval::Evaluator;

@@ -426,6 +426,13 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 
 ;; narrowing overrides an outer declared type within a branch:
 (check-types (lambda (x) (if (number? x) (+ x 1) 0)) '((x string)))  ; => ok
+
+; Effect tracking — walks the body WITHOUT running it, reporting any
+; operation it can prove is effectful (set!, print, shell, file I/O,
+; llm/tool-call, memory, gensym, load); quoted data is never flagged.
+(check-effects (lambda (x) (+ x 1)))            ; => pure
+(check-effects (lambda (x) (print x) (+ x 1)))  ; => ("print: performs I/O")
+(effectful? 'set!)                              ; => #t
 ```
 
 ---

@@ -501,6 +501,28 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
+    // ── Effect tracking ─────────────────────────────────────────────────────
+    b!("check-effects", |args| {
+        match args.first() {
+            Some(Value::Lambda { body, .. }) => {
+                let mut findings = Vec::new();
+                for stmt in body.iter() { crate::effect_check::check(stmt, &mut findings); }
+                if findings.is_empty() {
+                    Ok(Value::Symbol("pure".to_string()))
+                } else {
+                    Ok(list(findings.into_iter().map(Value::String).collect()))
+                }
+            }
+            _ => Err("check-effects: argument must be a lambda".into()),
+        }
+    });
+    b!("effectful?", |args| {
+        match args.first() {
+            Some(Value::Symbol(s)) => Ok(Value::Bool(crate::effect_check::effect_reason(s).is_some())),
+            _ => Err("effectful?: argument must be a symbol".into()),
+        }
+    });
+
     // ── Graph IR ───────────────────────────────────────────────────────────
     b!("graph-ir", |args| {
         match args.first() {
