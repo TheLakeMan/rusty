@@ -440,6 +440,14 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
                   '((-2 -1 0 1 2) (-2 -1 0 1 2)))       ; => verified
 (check-exhaustive (lambda (m e) (member (transition m e) modes))
                   (list modes events))                   ; => verified: transition is total & closed
+
+; Proof-by-checker synthesis — a proposer (scripted, or llm-proposer) suggests
+; candidates; only one passing every gate is accepted. Static gates (pure,
+; types) run FIRST and never execute the candidate.
+(define spec (list (list 'pure #t)
+                   (list 'domains '((0 1 2 3)))
+                   (list 'invariant (lambda (f x) (= (f x) (* x 2))))))
+(synthesize-verified spec my-proposer 5)   ; => (verified #<lambda (x)>) or (failed <reasons>)
 ```
 
 ---

@@ -318,6 +318,74 @@
              (register-signature (quote ,name) (quote ,ptypes) (quote unknown))
              (define (,name ,@names) ,@checks ,@rest))))))
 
+;; ── Proof-by-checker loop ──────────────────────────────────────────────────
+;; Synthesis with Rusty's own checkers as the verifier (ROADMAP 2.1): a
+;; proposer suggests candidate functions, verify-candidate gates each one,
+;; and only a candidate that passes every gate is accepted. The LLM is just
+;; one possible proposer — the loop is proposer-agnostic, so it works (and
+;; is tested) with a plain scripted proposer too.
+;;
+;; spec is an alist:
+;;   (pure #t)              — candidate must pass check-effects
+;;   (types ((p type)...))  — candidate must pass check-types with these
+;;   (domains ((v...)...))  — finite domains for exhaustive checking
+;;   (invariant f)          — (invariant candidate args...) must hold on
+;;                            every domain combination
+;; STATIC gates (pure/types) run first and never execute the candidate —
+;; an LLM-proposed candidate with visible side effects is rejected without
+;; ever being run. Only then does the exhaustive (executing) check fire.
+(define (spec-get spec key default)
+  (let ((hit (assoc key spec)))
+    (if hit (cadr hit) default)))
+
+(define (verify-candidate f spec)
+  (let ((static-reasons '()))
+    (when (spec-get spec 'pure #f)
+      (let ((eff (check-effects f)))
+        (when (not (equal? eff 'pure))
+          (set! static-reasons (cons (list 'impure eff) static-reasons)))))
+    (let ((types (spec-get spec 'types #f)))
+      (when types
+        (let ((t (check-types f types)))
+          (when (not (equal? t 'ok))
+            (set! static-reasons (cons (list 'type-errors t) static-reasons))))))
+    (if (not (null? static-reasons))
+        static-reasons
+        (let ((domains   (spec-get spec 'domains #f))
+              (invariant (spec-get spec 'invariant #f)))
+          (if (and domains invariant)
+              (let ((result (check-exhaustive
+                              (lambda args (apply invariant (cons f args)))
+                              domains)))
+                (if (equal? result 'verified)
+                    'verified
+                    (list (list 'counterexamples result))))
+              'verified)))))
+
+(define (synthesize-verified spec proposer max-attempts)
+  (let loop ((attempt 1) (feedback '()))
+    (if (> attempt max-attempts)
+        (list 'failed (reverse feedback))
+        (let ((candidate (proposer attempt feedback)))
+          (let ((result (verify-candidate candidate spec)))
+            (if (equal? result 'verified)
+                (list 'verified candidate)
+                (loop (+ attempt 1)
+                      (cons (list attempt result) feedback))))))))
+
+;; LLM-backed proposer (needs a llama-server-compatible endpoint running —
+;; see the llm builtin). Generated text becomes a callable via eval-string;
+;; verification failures are fed back into the next prompt.
+(define (llm-proposer task)
+  (lambda (attempt feedback)
+    (eval-string
+      (llm (string-append
+             "Write a single Rusty Lisp lambda for this task: " task
+             (if (null? feedback) ""
+                 (format "\nEarlier attempts failed verification: ~a" feedback))
+             "\nReply with ONLY the lambda s-expression, nothing else.")
+           0.2 300))))
+
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
   (load "agent.lisp")

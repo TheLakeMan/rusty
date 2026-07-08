@@ -529,6 +529,24 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
+    // ── eval-string ─────────────────────────────────────────────────────────
+    // Parses and evaluates a string of Rusty code in a FRESH environment
+    // (builtins + stdlib, not the caller's definitions). Exists for the
+    // proof-by-checker loop (std.lisp), where LLM-proposed candidate code
+    // arrives as text. Isolation from the session is a scoping property,
+    // not a security boundary — the real guard is that verify-candidate
+    // runs static checks (check-effects) before anything executes.
+    b!("eval-string", |args| {
+        match args.first() {
+            Some(Value::String(code)) => {
+                let env  = make_env();
+                let eval = Evaluator::new();
+                run_code(code, &env, &eval)
+            }
+            _ => Err("eval-string: argument must be a string".into()),
+        }
+    });
+
     // ── Bounded exhaustive checking ─────────────────────────────────────────
     // (check-exhaustive property '((domain1...) (domain2...) ...))
     // Runs `property` on EVERY combination of the given finite domains (one
