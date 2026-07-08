@@ -400,7 +400,16 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 (repeat n body...)
 
 ; Assertions
-(assert condition "message")
+(assert condition ["message"])   ; message optional — defaults to the literal condition text
+
+; Constraint embedding
+(defun-constrained (safe-sqrt x)
+  (assert (>= x 0))
+  (sqrt x))
+;; (safe-sqrt -4) raises "Assertion failed: (>= x 0)" instead of returning NaN
+
+; Logic-driven loss (crisp propositional logic, not fuzzy/differentiable)
+(logic-loss (and (implies P Q) (not R)))   ; => 0 if the formula holds, else 1
 ```
 
 ---

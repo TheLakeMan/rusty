@@ -34,12 +34,10 @@ In 5 years, Rusty will be:
 - **Deliverable:** Benchmark showing rusty-generated code matches or exceeds PyTorch performance on a simple neural layer — the `defrust` fib benchmark is a first data point; a neural-layer-scale benchmark still needs Graph IR wired into codegen (not yet done — today Graph IR only has its own tree-walking `graph-eval` interpreter, not a compiled backend).
 
 ### 1.3 Neuro-Symbolic Bridge Layer (Library)
-- [ ] **Constraint embedding**: Primitives for embedding logical constraints into function definitions
-  - `(defun-constrained (my-fn x) (assert (> x 0)) body...)`
-- [ ] **Logic-driven loss functions**: Encode propositional logic as loss penalties
-  - `(logic-loss (and (implies P Q) (not R)))`
-- [ ] **Knowledge graph bindings**: Integration with external symbolic knowledge bases (RDF, property graphs)
-- **Deliverable:** Example system (e.g., a classification model that respects logical invariants)
+- [x] **Constraint embedding**: `(defun-constrained (name params...) (assert cond [msg])... body...)` (std.lisp) — like `define`, but leading `(assert ...)` forms are checked against the function's own arguments on every call before `body` runs, so a violated invariant fails loudly instead of silently computing a wrong result (verified: `(safe-sqrt -4)` raises `"Assertion failed: (>= x 0)"` instead of returning `NaN`). `assert` itself became a macro (was a 2-arg function) so it can capture the literal condition text for a default message when none is given — nothing else in the repo called bare `assert` (only the unrelated `assert-equal`/`assert-true` test helpers), so this was safe to change.
+- [x] **Logic-driven loss functions**: `(implies p q)` and `(logic-loss formula)` (std.lisp, both trivial macros — `implies` ≡ `(or (not p) q)`, `logic-loss` is `0` if `formula` holds else `1`). This is **crisp propositional logic**, not fuzzy/differentiable logic — gradients don't flow through it. A soft-relaxed version usable in an actual gradient-based training loop is future work; today there's no training loop for it to plug into anyway.
+- [ ] **Knowledge graph bindings**: Integration with external symbolic knowledge bases (RDF, property graphs) — **not started**, deliberately: this needs picking a real external system/format (RDF via which crate? a specific property-graph DB?) and probably a new network-facing dependency, which is a call for the project owner, not an autonomous one.
+- **Deliverable:** Example system (e.g., a classification model that respects logical invariants) — not built; there's no classifier/training loop in Rusty yet for `logic-loss` to attach to.
 
 ---
 

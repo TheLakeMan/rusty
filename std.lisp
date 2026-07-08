@@ -239,9 +239,40 @@
   (for-each (lambda (x) (display x) (newline)) lst))
 
 ;; ── Assertions ─────────────────────────────────────────────────────────────
-(define (assert condition msg)
-  (when (not condition)
-    (error (string-append "Assertion failed: " msg))))
+;; A macro (not a plain function) so it can capture the literal condition
+;; text for a useful default message when none is given.
+(defmacro assert (condition . msg)
+  (if (null? msg)
+      `(when (not ,condition)
+         (error (string-append "Assertion failed: " (format "~a" (quote ,condition)))))
+      `(when (not ,condition) (error ,(car msg)))))
+
+;; ── Constraint embedding ───────────────────────────────────────────────────
+;; (defun-constrained (name params...) (assert cond [msg])... body...)
+;; Like `define`, but any leading (assert ...) forms are checked against the
+;; function's own arguments on every call, before body runs — the function
+;; either satisfies its declared invariants or fails loudly, instead of
+;; silently computing a wrong/undefined result.
+(define (constrained-checks forms)
+  (if (and (pair? forms) (pair? (car forms)) (equal? (car (car forms)) 'assert))
+      (cons (car forms) (constrained-checks (cdr forms)))
+      '()))
+
+(define (constrained-body forms)
+  (if (and (pair? forms) (pair? (car forms)) (equal? (car (car forms)) 'assert))
+      (constrained-body (cdr forms))
+      forms))
+
+(defmacro defun-constrained (sig . forms)
+  `(define ,sig ,@(constrained-checks forms) ,@(constrained-body forms)))
+
+;; ── Logic-driven loss functions ────────────────────────────────────────────
+;; Crisp propositional logic mapped to a fixed penalty — meant to be summed
+;; or weighted into a larger loss alongside numeric terms. This is NOT
+;; fuzzy/differentiable logic, so gradients don't flow through it; a
+;; soft-relaxed version is future work, not this.
+(defmacro implies (p q) `(or (not ,p) ,q))
+(defmacro logic-loss (formula) `(if ,formula 0 1))
 
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
