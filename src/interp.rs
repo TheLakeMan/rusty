@@ -886,6 +886,47 @@ pub fn setup_builtins(env: &Env) {
         } else { Err("json-decode: expected a string".into()) }
     });
 
+    // ── Model serialization (Phase 3.1) ──────────────────────────────────
+    // Rusty's own model format: a versioned JSON envelope over *data* values
+    // (numbers, strings, bools, symbols, lists, tensors) via serde_json.
+    // Symbols and tensors are tagged objects so they round-trip losslessly —
+    // unlike json-encode, which flattens symbols to strings. Code values
+    // (lambdas/tools/macros) are deliberately rejected: serializing live
+    // environments is Phase 3.2's checkpoint/restore, not model data.
+    b!("save-model", |args| {
+        match (args.first(), args.get(1)) {
+            (Some(Value::String(path)), Some(v)) => {
+                let body = model_to_json(v)?;
+                let envelope = serde_json::json!({ "rusty-model": 1, "value": body });
+                let text = serde_json::to_string_pretty(&envelope)
+                    .map_err(|e| format!("save-model: {}", e))?;
+                std::fs::write(path, text)
+                    .map_err(|e| format!("save-model: cannot write {}: {}", path, e))?;
+                Ok(Value::String(path.clone()))
+            }
+            _ => Err("save-model: (save-model \"path\" value)".into()),
+        }
+    });
+    b!("load-model", |args| {
+        match args.first() {
+            Some(Value::String(path)) => {
+                let text = std::fs::read_to_string(path)
+                    .map_err(|e| format!("load-model: cannot read {}: {}", path, e))?;
+                let envelope: serde_json::Value = serde_json::from_str(&text)
+                    .map_err(|e| format!("load-model: {} is not valid JSON: {}", path, e))?;
+                match envelope.get("rusty-model").and_then(|v| v.as_i64()) {
+                    Some(1) => {}
+                    Some(n) => return Err(format!("load-model: unsupported rusty-model version {}", n)),
+                    None => return Err(format!("load-model: {} is not a Rusty model file (missing \"rusty-model\" tag)", path)),
+                }
+                let body = envelope.get("value")
+                    .ok_or_else(|| format!("load-model: {} has no \"value\" field", path))?;
+                model_from_json(body)
+            }
+            _ => Err("load-model: (load-model \"path\")".into()),
+        }
+    });
+
     // ── I/O ───────────────────────────────────────────────────────────────
     b!("display", |args| {
         for a in args { match a { Value::String(s)=>print!("{}",s), other=>print!("{}",other) } }
@@ -1039,6 +1080,79 @@ pub fn setup_builtins(env: &Env) {
 }
 
 // ── JSON encode/decode ────────────────────────────────────────────────────
+
+// ── Model serialization helpers (Phase 3.1) ──────────────────────────────
+// Encoding: JSON scalars map directly (number/string/bool/null), JSON arrays
+// are lists, and objects are reserved for tags — {"t":"sym"} for symbols,
+// {"t":"tensor"} for tensors — so decoding is unambiguous. serde_json prints
+// f64 with shortest-round-trip precision (ryu), so finite values survive
+// save/load bit-exactly; NaN/Inf have no JSON form and are rejected up front.
+
+fn model_to_json(v: &Value) -> Result<serde_json::Value, String> {
+    match v {
+        Value::Nil       => Ok(serde_json::Value::Null),
+        Value::Bool(b)   => Ok(serde_json::json!(b)),
+        Value::Number(n) => {
+            if !n.is_finite() {
+                return Err("save-model: cannot serialize a non-finite number (NaN/Infinity has no JSON form)".into());
+            }
+            Ok(serde_json::json!(n))
+        }
+        Value::String(s) => Ok(serde_json::json!(s)),
+        Value::Symbol(s) => Ok(serde_json::json!({ "t": "sym", "v": s })),
+        Value::List(xs)  => xs.iter().map(model_to_json)
+            .collect::<Result<Vec<_>, _>>().map(serde_json::Value::Array),
+        Value::Tensor { data, shape } => {
+            if data.iter().any(|x| !x.is_finite()) {
+                return Err("save-model: tensor contains a non-finite value (NaN/Infinity has no JSON form)".into());
+            }
+            Ok(serde_json::json!({ "t": "tensor", "shape": shape, "data": &**data }))
+        }
+        other => Err(format!(
+            "save-model: cannot serialize {} — models are data (numbers, strings, symbols, lists, tensors); \
+             serializing code/environments is checkpoint/restore (roadmap 3.2)", other
+        )),
+    }
+}
+
+fn model_from_json(j: &serde_json::Value) -> Result<Value, String> {
+    match j {
+        serde_json::Value::Null      => Ok(Value::Nil),
+        serde_json::Value::Bool(b)   => Ok(Value::Bool(*b)),
+        serde_json::Value::Number(n) => n.as_f64().map(Value::Number)
+            .ok_or_else(|| format!("load-model: number {} does not fit an f64", n)),
+        serde_json::Value::String(s) => Ok(Value::String(s.clone())),
+        serde_json::Value::Array(items) => items.iter().map(model_from_json)
+            .collect::<Result<Vec<_>, _>>().map(list),
+        serde_json::Value::Object(map) => match map.get("t").and_then(|t| t.as_str()) {
+            Some("sym") => map.get("v").and_then(|v| v.as_str())
+                .map(|s| Value::Symbol(s.to_string()))
+                .ok_or_else(|| "load-model: sym tag without a string \"v\"".to_string()),
+            Some("tensor") => {
+                let shape: Vec<usize> = map.get("shape").and_then(|s| s.as_array())
+                    .ok_or_else(|| "load-model: tensor tag without a \"shape\" array".to_string())?
+                    .iter().map(|d| d.as_u64().map(|d| d as usize)
+                        .ok_or_else(|| "load-model: tensor shape must be non-negative integers".to_string()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let data: Vec<f64> = map.get("data").and_then(|d| d.as_array())
+                    .ok_or_else(|| "load-model: tensor tag without a \"data\" array".to_string())?
+                    .iter().map(|x| x.as_f64()
+                        .ok_or_else(|| "load-model: tensor data must be numbers".to_string()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let expected: usize = shape.iter().product();
+                if expected != data.len() {
+                    return Err(format!(
+                        "load-model: tensor shape {:?} implies {} element(s), data has {}",
+                        shape, expected, data.len()
+                    ));
+                }
+                Ok(Value::Tensor { data: std::rc::Rc::new(data), shape })
+            }
+            Some(other) => Err(format!("load-model: unrecognized tag \"{}\"", other)),
+            None => Err("load-model: JSON object without a \"t\" tag is not valid model data".into()),
+        },
+    }
+}
 
 pub fn json_encode(v: &Value) -> String {
     match v {

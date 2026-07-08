@@ -514,6 +514,26 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 (graph-eval (lambda (x W b) (tensor-add (matmul x W) b)) X W B)
 ```
 
+### Model Serialization
+
+```lisp
+; Rusty's own model format: a versioned JSON envelope over data values —
+; numbers, strings, bools, symbols, lists, tensors. Symbols and tensors are
+; tagged so they round-trip losslessly (unlike json-encode, which flattens
+; symbols to strings); finite f64s are bit-exact across save/load.
+(define model (list (list 'W (tensor '((0.5 1) (1.5 2))))
+                    (list 'b (tensor '((4 5))))))
+(save-model "model.json" model)     ; => "model.json"
+(equal? model (load-model "model.json"))   ; => #t
+
+; Graph IR state is already list data, so it serializes as-is:
+(save-model "graph.json" (graph-ir (lambda (x w) (matmul x w))))
+
+; code values are rejected by design — serializing live environments is
+; checkpoint/restore (roadmap 3.2), not model data:
+(save-model "f.json" (lambda (x) x))   ; => error
+```
+
 ---
 
 ## Tail Call Optimization
