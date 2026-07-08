@@ -239,4 +239,4 @@ The trampoline loop allows unlimited recursion without stack growth.
 
 **Last updated:** July 2026 | [→ Full Roadmap](./ROADMAP.md)
 
-🦀
+☯

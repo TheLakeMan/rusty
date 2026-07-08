@@ -210,4 +210,4 @@ This section is now stale relative to actual progress — most of it shipped in 
 
 **Last updated:** July 2026 | **Status:** Phases 1 and 2 complete; Phase 3 (Native ML Capability) open
 
-🦀 *In memory of my brother.*
+☯ *In memory of my brother.*

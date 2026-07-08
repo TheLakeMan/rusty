@@ -526,4 +526,4 @@ See [ROADMAP.md](./ROADMAP.md) for planned features and [ARCHITECTURE.md](./ARCH
 
 MIT
 
-🦀 *In memory of my brother.*
+☯ *In memory of my brother.*
