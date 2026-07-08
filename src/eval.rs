@@ -661,6 +661,21 @@ impl Evaluator {
                             env = child;
                             continue;
                         }
+                        // Tools are first-class callables, same shape as Lambda
+                        // (fixed params, no rest) — needed so `apply` and the
+                        // 2.3 contract layer (std.lisp safe-call) can invoke
+                        // them without going through the tool-call form.
+                        Value::Tool { name, params, body, env: tenv, .. } => {
+                            if args.len() != params.len() {
+                                return Err(format!("{}: expected {} arg(s), got {}", name, params.len(), args.len()));
+                            }
+                            let child = EnvFrame::extend(&tenv, &params, &None, args)?;
+                            let last = body.len() - 1;
+                            for e in &body[..last] { self.eval(e, &child)?; }
+                            cur = body[last].clone();
+                            env = child;
+                            continue;
+                        }
                         Value::Native { name, arity, fn_ptr, .. } => {
                             if args.len() != arity {
                                 return Err(format!("{}: expected {} arg(s), got {}", name, arity, args.len()));

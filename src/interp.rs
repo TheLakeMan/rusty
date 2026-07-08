@@ -95,6 +95,12 @@ pub fn apply_value(f: &Value, args: &[Value], eval: &Evaluator) -> Result<Value,
             for e in &body[..last] { eval.eval(e, &child)?; }
             eval.eval(&body[last], &child)
         }
+        Value::Tool { params, body, env, .. } => {
+            let child = EnvFrame::extend(env, params, &None, args.to_vec())?;
+            let last  = body.len() - 1;
+            for e in &body[..last] { eval.eval(e, &child)?; }
+            eval.eval(&body[last], &child)
+        }
         _ => Err(format!("Not callable: {}", f)),
     }
 }
@@ -606,7 +612,7 @@ pub fn setup_builtins(env: &Env) {
     // ── Effect tracking ─────────────────────────────────────────────────────
     b!("check-effects", |args| {
         match args.first() {
-            Some(Value::Lambda { body, .. }) => {
+            Some(Value::Lambda { body, .. }) | Some(Value::Tool { body, .. }) => {
                 let mut findings = Vec::new();
                 for stmt in body.iter() { crate::effect_check::check(stmt, &mut findings); }
                 if findings.is_empty() {
@@ -615,7 +621,7 @@ pub fn setup_builtins(env: &Env) {
                     Ok(list(findings.into_iter().map(Value::String).collect()))
                 }
             }
-            _ => Err("check-effects: argument must be a lambda".into()),
+            _ => Err("check-effects: argument must be a lambda or tool".into()),
         }
     });
     b!("effectful?", |args| {
@@ -728,6 +734,12 @@ pub fn setup_builtins(env: &Env) {
 
     // ── Tool predicate ────────────────────────────────────────────────────
     b!("tool?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tool{..})))));
+    b!("tool-name", |args| {
+        match args.first() {
+            Some(Value::Tool { name, .. }) => Ok(Value::Symbol(name.clone())),
+            _ => Err("tool-name: argument must be a tool".into()),
+        }
+    });
 
     // ── Memory system ─────────────────────────────────────────────────────
     // Stored as ~/.rusty/memory.lisp — plain Lisp defines, human readable

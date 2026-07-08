@@ -448,6 +448,15 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
                    (list 'domains '((0 1 2 3)))
                    (list 'invariant (lambda (f x) (= (f x) (* x 2))))))
 (synthesize-verified spec my-proposer 5)   ; => (verified #<lambda (x)> <attempts>) or (failed <reasons>)
+
+; Tool specifications & chain certification — contracts for deftool tools.
+; Tools are first-class callables; safe-call checks arity/types/precondition
+; BEFORE the tool body runs; certify-tool-chain requires every tool to have
+; a spec, be honest about its effects, and respect dependency order.
+(deftool-spec save-note '((note list)) '(write-file) #f '(mk-note))
+(safe-call mk-note "groceries")                     ; contract-checked invocation
+(certify-tool-chain (list mk-note save-note))       ; => certified
+(certify-tool-chain (list save-note mk-note))       ; => ((save-note deps-not-satisfied (mk-note)))
 ```
 
 ---

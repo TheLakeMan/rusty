@@ -64,10 +64,10 @@ Everything here was already built self-contained, before "no external runtime de
 - **Deliverable:** Type checker that catches common agent errors (e.g., passing wrong arg types to tools) — satisfied by `define-typed` (runtime) and `check-types` (static) above.
 
 ### 2.3 Tool Registry with Specifications
-- [ ] **Tool specifications**: Formal signatures + invariants for all tools
-- [ ] **Contract enforcement**: Runtime checks + static verification — reuse `define-typed`/`check-types`/`check-effects` (2.2) against `deftool` signatures rather than building a second, parallel contract system
-- [ ] **Tool dependency graphs**: Track dependencies and execution order constraints
-- **Deliverable:** Safety certification for agent tool chains (provably safe execution) — "provable" via the self-contained checkers above, same as 2.1
+- [x] **Tool specifications**: `(deftool-spec tool '((param type)...) '(allowed-effect-ops...) precondition deps)` (std.lisp, `*tool-specs*` registry) — declares param types, the effect *operations* the tool is allowed to perform (op names as `check-effects` knows them), an optional precondition lambda over the args, and dependencies on other tools. Enabled by making tools first-class callables (Rust: `Value::Tool` added to the eval call dispatch and `apply_value`, same shape as `Lambda`; new `tool-name` builtin; `check-effects` accepts tools).
+- [x] **Contract enforcement**: `(safe-call tool args...)` checks arity, arg types, and precondition *before* the tool body runs — a violated contract raises instead of letting a system-touching tool fire on bad inputs (verified: wrong type, wrong arity, and failed precondition each refuse cleanly; valid calls pass through). Plus static *effect honesty*: `undeclared-effects` cross-checks a tool's declared effects against what `check-effects` actually finds in its body, without executing it.
+- [x] **Tool dependency graphs**: specs carry deps; `(certify-tool-chain (list tool...))` walks an intended execution order and requires every tool's declared deps to appear earlier in the chain.
+- **Deliverable:** Safety certification for agent tool chains — **done**: `certify-tool-chain` returns `'certified` only when every tool in the chain has a spec, is honest about its effects, and respects dependency order; verified flagging each failure mode individually (missing spec, `print`-ing tool that declared no effects, dependency listed after its dependent). "Provable" via the self-contained checkers, same as 2.1 — Phase 2 is now complete.
 
 ---
 
@@ -208,6 +208,6 @@ This section is now stale relative to actual progress — most of it shipped in 
 
 ---
 
-**Last updated:** July 2026 | **Status:** Phase 1 complete; Phase 2.2 complete; Phase 2.1/2.3, Phase 3 open
+**Last updated:** July 2026 | **Status:** Phases 1 and 2 complete; Phase 3 (Native ML Capability) open
 
 🦀 *In memory of the brother who inspired this journey.*

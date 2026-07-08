@@ -426,6 +426,92 @@
                "\nReply with ONLY the lambda s-expression, nothing else.")
              0.2 300)))))
 
+;; ── Tool specifications & chain certification ──────────────────────────────
+;; ROADMAP 2.3: contracts for deftool tools, reusing the 2.1/2.2 checkers
+;; rather than a second contract system. A spec declares param types, the
+;; effect OPERATIONS the tool is allowed to perform (op names as known to
+;; check-effects / effectful?, e.g. shell print write-file), an optional
+;; precondition over the args, and dependencies on other tools.
+(define *tool-specs* '())
+
+(define (deftool-spec tool param-types effects precondition deps)
+  (set! *tool-specs*
+    (cons (list (tool-name tool) tool param-types effects precondition deps)
+          (filter (lambda (s) (not (equal? (car s) (tool-name tool)))) *tool-specs*)))
+  (tool-name tool))
+
+(define (tool-spec name) (assoc name *tool-specs*))
+(define (spec-tool-value s)  (cadr s))
+(define (spec-param-types s) (caddr s))
+(define (spec-effects s)     (cadddr s))
+(define (spec-pre s)         (nth s 4))
+(define (spec-deps s)        (nth s 5))
+
+(define (type-pred ty)
+  (cond ((equal? ty 'number)    number?)
+        ((equal? ty 'string)    string?)
+        ((equal? ty 'boolean)   boolean?)
+        ((equal? ty 'symbol)    symbol?)
+        ((equal? ty 'list)      list?)
+        ((equal? ty 'procedure) procedure?)
+        (else (lambda (v) #t))))          ; unknown/unannotated — never flagged
+
+;; Contract-enforced invocation: arity, arg types, and precondition are all
+;; checked BEFORE the tool body runs — a violated contract raises instead of
+;; letting the tool fire on bad inputs (these tools touch the real system).
+(define (safe-call tool . args)
+  (let ((s (tool-spec (tool-name tool))))
+    (assert s (format "safe-call: no spec registered for ~a" (tool-name tool)))
+    (assert (= (length args) (length (spec-param-types s)))
+            (format "safe-call: ~a expects ~a arg(s), got ~a"
+                    (tool-name tool) (length (spec-param-types s)) (length args)))
+    (for-each
+      (lambda (pair)
+        (let ((arg (car pair)) (pt (cadr pair)))
+          (assert ((type-pred (cadr pt)) arg)
+                  (format "safe-call: ~a: ~a must be ~a" (tool-name tool) (car pt) (cadr pt)))))
+      (zip args (spec-param-types s)))
+    (when (spec-pre s)
+      (assert (apply (spec-pre s) args)
+              (format "safe-call: ~a: precondition violated" (tool-name tool))))
+    (apply tool args)))
+
+;; Effect honesty: every operation check-effects finds in the tool's body
+;; must be covered by its declared effects list — a tool can't claim less
+;; than it does. (Static, never executes the tool.)
+(define (finding-op f) (string->symbol (substring f 0 (string-first-index f ":"))))
+
+(define (undeclared-effects tool declared)
+  (let ((found (check-effects tool)))
+    (if (equal? found 'pure) '()
+        (filter (lambda (op) (not (member op declared)))
+                (remove-duplicates (map finding-op found))))))
+
+;; Chain certification: takes a list of tool VALUES in intended execution
+;; order; every tool must have a spec, be honest about its effects, and
+;; have its declared dependencies appear EARLIER in the chain.
+;; Returns 'certified or a list of (tool-name reason...) findings.
+(define (certify-tool-chain chain)
+  (let loop ((rest chain) (seen '()) (problems '()))
+    (if (null? rest)
+        (if (null? problems) 'certified (reverse problems))
+        (let ((tool (car rest)))
+          (let ((name (tool-name tool)) (s (tool-spec (tool-name tool))))
+            (cond
+              ((not s)
+               (loop (cdr rest) (cons name seen)
+                     (cons (list name 'no-spec) problems)))
+              (else
+               (let ((lies (undeclared-effects tool (spec-effects s)))
+                     (missing (filter (lambda (d) (not (member d seen))) (spec-deps s))))
+                 (loop (cdr rest) (cons name seen)
+                       (append
+                         (if (null? missing) '()
+                             (list (list name 'deps-not-satisfied missing)))
+                         (if (null? lies) '()
+                             (list (list name 'undeclared-effects lies)))
+                         problems))))))))))
+
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
   (load "agent.lisp")
