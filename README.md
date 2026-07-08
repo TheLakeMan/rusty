@@ -447,7 +447,7 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 (define spec (list (list 'pure #t)
                    (list 'domains '((0 1 2 3)))
                    (list 'invariant (lambda (f x) (= (f x) (* x 2))))))
-(synthesize-verified spec my-proposer 5)   ; => (verified #<lambda (x)>) or (failed <reasons>)
+(synthesize-verified spec my-proposer 5)   ; => (verified #<lambda (x)> <attempts>) or (failed <reasons>)
 ```
 
 ---

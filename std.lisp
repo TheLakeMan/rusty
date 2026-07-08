@@ -384,7 +384,9 @@
                           (list 'rejected result))))
                   (e) (list 'rejected (list (list 'error e))))))
           (if (equal? (car outcome) 'ok)
-              (list 'verified (cadr outcome))
+              ;; (verified <fn> <attempts-used>) — caddr tells you whether
+              ;; the proposer nailed it first try or needed feedback rounds
+              (list 'verified (cadr outcome) attempt)
               (loop (+ attempt 1)
                     (cons (list attempt (cadr outcome)) feedback)))))))
 
