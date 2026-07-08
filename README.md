@@ -459,6 +459,21 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 (certify-tool-chain (list save-note mk-note))       ; => ((save-note deps-not-satisfied (mk-note)))
 ```
 
+### Native Tensors
+
+```lisp
+; Rusty's own tensors — flat f64 buffers + shape, zero ML-framework deps.
+(define t (tensor '((1 2 3) (4 5 6))))       ; shape inferred, ragged input rejected
+(tensor-shape t)                              ; => (2 3)
+(tensor-add t t)                              ; elementwise; scalars broadcast: (tensor-mul t 10)
+(matmul (tensor '((1 2) (3 4))) (tensor '((5 6) (7 8))))   ; => #<tensor 2x2 [19 22 43 50]>
+(transpose t) (tensor-map square t) (tensor-sum t)
+(zeros '(2 3 4)) (ones '(2))
+
+; a linear layer is three calls:
+(define (linear-forward x W b) (tensor-add (matmul x W) b))
+```
+
 ---
 
 ## Tail Call Optimization

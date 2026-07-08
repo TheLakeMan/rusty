@@ -114,7 +114,79 @@ pub fn value_equal(a: &Value, b: &Value) -> bool {
         (Value::Nil,        Value::Nil)        => true,
         (Value::List(xs),   Value::List(ys))   =>
             xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(a,b)| value_equal(a,b)),
+        (Value::Tensor { data: xd, shape: xs }, Value::Tensor { data: yd, shape: ys }) =>
+            xs == ys && xd == yd,
         _ => false,
+    }
+}
+
+// ── Tensor helpers ────────────────────────────────────────────────────────
+
+fn nested_to_tensor(v: &Value) -> Result<(Vec<f64>, Vec<usize>), String> {
+    match v {
+        Value::Number(n) => Ok((vec![*n], vec![])),
+        Value::List(items) if !items.is_empty() => {
+            let mut sub_shape: Option<Vec<usize>> = None;
+            let mut data = Vec::new();
+            for item in items.iter() {
+                let (d, s) = nested_to_tensor(item)?;
+                match &sub_shape {
+                    None => sub_shape = Some(s),
+                    Some(prev) if *prev == s => {}
+                    _ => return Err("tensor: ragged nested list — all rows must have the same shape".into()),
+                }
+                data.extend(d);
+            }
+            let mut shape = vec![items.len()];
+            shape.extend(sub_shape.unwrap());
+            Ok((data, shape))
+        }
+        _ => Err("tensor: elements must be numbers or non-empty nested lists of numbers".into()),
+    }
+}
+
+fn tensor_to_nested(data: &[f64], shape: &[usize]) -> Value {
+    if shape.is_empty() { return Value::Number(data[0]); }
+    if shape.len() == 1 { return list(data.iter().map(|n| Value::Number(*n)).collect()); }
+    let chunk = data.len() / shape[0];
+    list(data.chunks(chunk).map(|c| tensor_to_nested(c, &shape[1..])).collect())
+}
+
+fn tensor_fill(args: &[Value], fill: f64, name: &str) -> Result<Value, String> {
+    match args.first() {
+        Some(Value::List(dims)) => {
+            let shape: Vec<usize> = dims.iter().map(|v| match v {
+                Value::Number(n) if *n >= 1.0 => Ok(*n as usize),
+                _ => Err(format!("{}: dimensions must be positive numbers", name)),
+            }).collect::<Result<Vec<_>, _>>()?;
+            let len = shape.iter().product();
+            Ok(Value::Tensor { data: std::rc::Rc::new(vec![fill; len]), shape })
+        }
+        _ => Err(format!("{}: ({} '(dim...))", name, name)),
+    }
+}
+
+// Elementwise op over tensor⊕tensor (same shape) or tensor⊕scalar in
+// either order (scalar broadcasts).
+fn tensor_binop2(args: &[Value], name: &str, f: fn(f64, f64) -> f64) -> Result<Value, String> {
+    if args.len() != 2 { return Err(format!("{}: 2 args", name)); }
+    match (&args[0], &args[1]) {
+        (Value::Tensor { data: a, shape: ash }, Value::Tensor { data: b, shape: bsh }) => {
+            if ash != bsh {
+                return Err(format!("{}: shape mismatch {:?} vs {:?}", name, ash, bsh));
+            }
+            Ok(Value::Tensor {
+                data:  std::rc::Rc::new(a.iter().zip(b.iter()).map(|(x, y)| f(*x, *y)).collect()),
+                shape: ash.clone(),
+            })
+        }
+        (Value::Tensor { data, shape }, Value::Number(k)) => Ok(Value::Tensor {
+            data: std::rc::Rc::new(data.iter().map(|x| f(*x, *k)).collect()), shape: shape.clone(),
+        }),
+        (Value::Number(k), Value::Tensor { data, shape }) => Ok(Value::Tensor {
+            data: std::rc::Rc::new(data.iter().map(|x| f(*k, *x)).collect()), shape: shape.clone(),
+        }),
+        _ => Err(format!("{}: arguments must be tensors or numbers", name)),
     }
 }
 
@@ -347,9 +419,11 @@ pub fn setup_builtins(env: &Env) {
         Some(Value::Lambda{..})  => "lambda",
         Some(Value::Macro{..})   => "macro",
         Some(Value::Tool{..})   => "tool",
+        Some(Value::Tensor{..}) => "tensor",
         Some(Value::Native{..}) => "native",
         None                     => "nil",
     }.to_string())));
+    b!("tensor?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tensor{..})))));
 
     // ── Strings ───────────────────────────────────────────────────────────
     b!("string-length",  |args| {
@@ -465,6 +539,112 @@ pub fn setup_builtins(env: &Env) {
                 })
             }
             _ => Err("grad: (grad (lambda (x ...) expr)) — argument must be a lambda".into()),
+        }
+    });
+
+    // ── Native tensors (Phase 3.1) ──────────────────────────────────────────
+    b!("tensor", |args| {
+        let v = args.first().ok_or("tensor: (tensor nested-list)")?;
+        let (data, shape) = nested_to_tensor(v)?;
+        Ok(Value::Tensor { data: std::rc::Rc::new(data), shape })
+    });
+    b!("tensor-shape", |args| {
+        match args.first() {
+            Some(Value::Tensor { shape, .. }) =>
+                Ok(list(shape.iter().map(|d| Value::Number(*d as f64)).collect())),
+            _ => Err("tensor-shape: argument must be a tensor".into()),
+        }
+    });
+    b!("tensor->list", |args| {
+        match args.first() {
+            Some(Value::Tensor { data, shape }) => Ok(tensor_to_nested(data, shape)),
+            _ => Err("tensor->list: argument must be a tensor".into()),
+        }
+    });
+    b!("zeros", |args| tensor_fill(args, 0.0, "zeros"));
+    b!("ones",  |args| tensor_fill(args, 1.0, "ones"));
+    b!("tensor-ref", |args| {
+        match args.first() {
+            Some(Value::Tensor { data, shape }) => {
+                let idx: Vec<usize> = args[1..].iter().map(|v| match v {
+                    Value::Number(n) => Ok(*n as usize),
+                    _ => Err("tensor-ref: indices must be numbers".to_string()),
+                }).collect::<Result<Vec<_>, _>>()?;
+                if idx.len() != shape.len() {
+                    return Err(format!("tensor-ref: {} index(es) for a rank-{} tensor", idx.len(), shape.len()));
+                }
+                let mut flat = 0usize;
+                for (i, (&ix, &dim)) in idx.iter().zip(shape.iter()).enumerate() {
+                    if ix >= dim { return Err(format!("tensor-ref: index {} out of range for axis {} (size {})", ix, i, dim)); }
+                    flat = flat * dim + ix;
+                }
+                Ok(Value::Number(data[flat]))
+            }
+            _ => Err("tensor-ref: first argument must be a tensor".into()),
+        }
+    });
+    b!("tensor-add", |args| tensor_binop2(args, "tensor-add", |a, b| a + b));
+    b!("tensor-sub", |args| tensor_binop2(args, "tensor-sub", |a, b| a - b));
+    b!("tensor-mul", |args| tensor_binop2(args, "tensor-mul", |a, b| a * b));
+    b!("tensor-div", |args| tensor_binop2(args, "tensor-div", |a, b| a / b));
+    b!("tensor-sum", |args| {
+        match args.first() {
+            Some(Value::Tensor { data, .. }) => Ok(Value::Number(data.iter().sum())),
+            _ => Err("tensor-sum: argument must be a tensor".into()),
+        }
+    });
+    b!("tensor-map", |args| {
+        if args.len() != 2 { return Err("tensor-map: (tensor-map fn tensor)".into()); }
+        match &args[1] {
+            Value::Tensor { data, shape } => {
+                let eval = Evaluator::new();
+                let mapped: Result<Vec<f64>, String> = data.iter().map(|x| {
+                    match apply_value(&args[0], &[Value::Number(*x)], &eval)? {
+                        Value::Number(n) => Ok(n),
+                        other => Err(format!("tensor-map: fn must return a number, got {}", other)),
+                    }
+                }).collect();
+                Ok(Value::Tensor { data: std::rc::Rc::new(mapped?), shape: shape.clone() })
+            }
+            _ => Err("tensor-map: second argument must be a tensor".into()),
+        }
+    });
+    b!("matmul", |args| {
+        match (args.first(), args.get(1)) {
+            (Some(Value::Tensor { data: a, shape: ash }), Some(Value::Tensor { data: b, shape: bsh })) => {
+                if ash.len() != 2 || bsh.len() != 2 {
+                    return Err("matmul: both tensors must be rank 2".into());
+                }
+                let (m, k) = (ash[0], ash[1]);
+                let (k2, n) = (bsh[0], bsh[1]);
+                if k != k2 { return Err(format!("matmul: inner dimensions differ ({}x{} · {}x{})", m, k, k2, n)); }
+                let mut out = vec![0.0; m * n];
+                for i in 0..m {
+                    for p in 0..k {
+                        let aip = a[i * k + p];
+                        for j in 0..n {
+                            out[i * n + j] += aip * b[p * n + j];
+                        }
+                    }
+                }
+                Ok(Value::Tensor { data: std::rc::Rc::new(out), shape: vec![m, n] })
+            }
+            _ => Err("matmul: both arguments must be tensors".into()),
+        }
+    });
+    b!("transpose", |args| {
+        match args.first() {
+            Some(Value::Tensor { data, shape }) if shape.len() == 2 => {
+                let (m, n) = (shape[0], shape[1]);
+                let mut out = vec![0.0; m * n];
+                for i in 0..m {
+                    for j in 0..n {
+                        out[j * m + i] = data[i * n + j];
+                    }
+                }
+                Ok(Value::Tensor { data: std::rc::Rc::new(out), shape: vec![n, m] })
+            }
+            _ => Err("transpose: argument must be a rank-2 tensor".into()),
         }
     });
 

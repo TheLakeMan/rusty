@@ -42,6 +42,13 @@ pub enum Value {
         body: Vec<Expr>,
         env: Env,
     },
+    // Native tensor (Phase 3.1): flat row-major f64 buffer + shape.
+    // Rc'd like List, so clone is a refcount bump. No external ML crate —
+    // this is Rusty's own tensor, per the no-external-deps constraint.
+    Tensor {
+        data:  Rc<Vec<f64>>,
+        shape: Vec<usize>,
+    },
     // A `defrust`-compiled function: real Rust, compiled via rustc and
     // dynamically loaded. `fn_ptr` is a raw `extern "C" fn(*const f64, usize)
     // -> f64` transmuted to a data pointer (dodges fighting libloading's
@@ -88,6 +95,17 @@ impl std::fmt::Display for Value {
                 write!(f, ")>")
             }
             Value::Tool { name, .. } => write!(f, "#<tool:{}>", name),
+            Value::Tensor { data, shape } => {
+                let dims: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
+                if data.len() <= 8 {
+                    let vals: Vec<String> = data.iter().map(|v| {
+                        if v.fract() == 0.0 && v.abs() < 1e15 { format!("{}", *v as i64) } else { format!("{}", v) }
+                    }).collect();
+                    write!(f, "#<tensor {} [{}]>", dims.join("x"), vals.join(" "))
+                } else {
+                    write!(f, "#<tensor {}>", dims.join("x"))
+                }
+            }
             Value::Native { name, arity, .. } => write!(f, "#<native:{}/{}>", name, arity),
             Value::Nil => write!(f, "()"),
         }
