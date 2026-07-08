@@ -410,6 +410,13 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 
 ; Logic-driven loss (crisp propositional logic, not fuzzy/differentiable)
 (logic-loss (and (implies P Q) (not R)))   ; => 0 if the formula holds, else 1
+
+; Gradual typing — runtime contracts at call time; define/lambda are
+; untouched, this is a separate opt-in macro. ti/return-type name an
+; existing <type>? predicate (number, string, boolean, symbol, list, ...).
+(define-typed (add-typed (x : number) (y : number)) : number
+  (+ x y))
+(add-typed 3 "oops")   ; => Error: expected number, got a different type
 ```
 
 ---

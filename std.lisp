@@ -274,6 +274,37 @@
 (defmacro implies (p q) `(or (not ,p) ,q))
 (defmacro logic-loss (formula) `(if ,formula 0 1))
 
+;; ── Gradual typing ───────────────────────────────────────────────────────
+;; (define-typed (name (p1 : t1) (p2 : t2) untyped-p3 ...) : return-type
+;;   body...)
+;; plain `define`/`lambda` are completely untouched by this — define-typed
+;; is an opt-in macro, so annotate only the functions (and only the
+;; parameters) you want checked. Each ti/return-type must name an existing
+;; `<type>?` predicate (number, string, boolean, symbol, list, procedure,
+;; ...); checks run at call time (runtime contracts, not static analysis —
+;; real flow-sensitive static typing is a much larger undertaking than a
+;; library macro can give you). No rest-arg (`.`) support in v1.
+(define (type-check-form val-expr type)
+  (let ((pred (string->symbol (string-append (symbol->string type) "?"))))
+    `(assert (,pred ,val-expr) ,(string-append "expected " (symbol->string type) ", got a different type"))))
+
+(define (typed-param-name p) (if (pair? p) (car p) p))
+(define (typed-param-check p)
+  (if (pair? p) (type-check-form (typed-param-name p) (caddr p)) #f))
+
+(defmacro define-typed (sig . rest)
+  (let ((name (car sig)) (params (cdr sig)))
+    (let ((checks (filter (lambda (x) x) (map typed-param-check params)))
+          (names  (map typed-param-name params)))
+      (if (and (pair? rest) (equal? (car rest) ':))
+          (let ((rtype (cadr rest)) (body (cddr rest)) (result (gensym "result")))
+            `(define (,name ,@names)
+               ,@checks
+               (let ((,result (begin ,@body)))
+                 ,(type-check-form result rtype)
+                 ,result)))
+          `(define (,name ,@names) ,@checks ,@rest)))))
+
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
   (load "agent.lisp")
