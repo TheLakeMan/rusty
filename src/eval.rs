@@ -622,8 +622,10 @@ impl Evaluator {
                             let arg_vals: Vec<Value> = lst[1..].iter().map(expr_to_value).collect();
                             let mac_child = EnvFrame::extend(&mac_env, &params, &rest, arg_vals)?;
                             let last = body.len() - 1;
+                            let profile_start = macro_profile::start(s);
                             for e in &body[..last] { self.eval(e, &mac_child)?; }
                             let expanded = self.eval(&body[last], &mac_child)?;
+                            macro_profile::finish(s, profile_start);
                             cur = value_to_expr(&expanded);
                             continue;
                         }
@@ -907,6 +909,52 @@ fn extract_let_parts(list: &[Expr]) -> Result<(Vec<(String, Expr)>, Vec<Expr>), 
 pub fn wrap_begin(mut exprs: Vec<Expr>) -> Expr {
     if exprs.len() == 1 { exprs.remove(0) }
     else { let mut v = vec![Expr::Symbol("begin".into())]; v.extend(exprs); Expr::List(v) }
+}
+
+// ── Macro expansion profiler ──────────────────────────────────────────────
+//
+// Off by default (`start` is a single bool check, so zero overhead when
+// unused). Turn on with `(macro-profile-on)`, inspect with
+// `(macro-profile-report)`, which returns (name call-count
+// total-microseconds) rows sorted by total time descending — debugging aid
+// for finding which macros are used heavily or expand slowly.
+pub mod macro_profile {
+    use std::cell::{Cell, RefCell};
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    thread_local! {
+        static ENABLED: Cell<bool> = Cell::new(false);
+        static STATS: RefCell<HashMap<String, (u64, u128)>> = RefCell::new(HashMap::new());
+    }
+
+    pub fn set_enabled(on: bool) { ENABLED.with(|c| c.set(on)); }
+    pub fn reset() { STATS.with(|s| s.borrow_mut().clear()); }
+
+    pub fn start(_name: &str) -> Option<Instant> {
+        if ENABLED.with(|c| c.get()) { Some(Instant::now()) } else { None }
+    }
+
+    pub fn finish(name: &str, started: Option<Instant>) {
+        if let Some(t0) = started {
+            let micros = t0.elapsed().as_micros();
+            STATS.with(|s| {
+                let mut s = s.borrow_mut();
+                let entry = s.entry(name.to_string()).or_insert((0, 0));
+                entry.0 += 1;
+                entry.1 += micros;
+            });
+        }
+    }
+
+    pub fn report() -> Vec<(String, u64, u128)> {
+        STATS.with(|s| {
+            let mut rows: Vec<(String, u64, u128)> =
+                s.borrow().iter().map(|(k, &(c, t))| (k.clone(), c, t)).collect();
+            rows.sort_by(|a, b| b.2.cmp(&a.2));
+            rows
+        })
+    }
 }
 
 // ── Macro hygiene ─────────────────────────────────────────────────────────

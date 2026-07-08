@@ -445,6 +445,19 @@ pub fn setup_builtins(env: &Env) {
         Ok(Value::Symbol(crate::env::gensym_name(&prefix)))
     });
 
+    // ── Macro profiler ───────────────────────────────────────────────────
+    b!("macro-profile-on", |_| { crate::eval::macro_profile::set_enabled(true); Ok(Value::Nil) });
+    b!("macro-profile-off", |_| { crate::eval::macro_profile::set_enabled(false); Ok(Value::Nil) });
+    b!("macro-profile-reset", |_| { crate::eval::macro_profile::reset(); Ok(Value::Nil) });
+    b!("macro-profile-report", |_| {
+        let rows: Vec<Value> = crate::eval::macro_profile::report().into_iter()
+            .map(|(name, count, micros)| list(vec![
+                Value::Symbol(name), Value::Number(count as f64), Value::Number(micros as f64),
+            ]))
+            .collect();
+        Ok(list(rows))
+    });
+
     // ── Math extras ───────────────────────────────────────────────────────
     b!("gcd", |args| {
         fn gcd(a: u64, b: u64) -> u64 { if b==0{a}else{gcd(b,a%b)} }

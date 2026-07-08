@@ -235,6 +235,16 @@ maturin build          # build wheel for distribution
 (gensym "prefix")    ; unique symbol for hygienic macros
 ```
 
+### Macro Profiler
+
+```lisp
+(macro-profile-on)          ; start recording expansion counts/timing (off by default)
+(macro-profile-report)      ; => ((name call-count total-microseconds) ...) sorted by time desc
+(show-macro-profile)        ; pretty-print the above
+(macro-profile-reset)
+(macro-profile-off)
+```
+
 ### Agent / Tool Forms
 
 ```lisp

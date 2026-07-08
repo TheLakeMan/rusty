@@ -66,6 +66,18 @@
        (set! ,a ,b)
        (set! ,b ,tmp))))
 
+;; ── Macro profiler ─────────────────────────────────────────────────────────
+;; (macro-profile-on) / (macro-profile-off) toggle instrumentation (off by
+;; default — zero overhead when unused). (macro-profile-report) returns raw
+;; (name call-count total-microseconds) rows, sorted by total time
+;; descending; (show-macro-profile) pretty-prints them.
+(define (show-macro-profile)
+  (println "Macro expansion profile (name  calls  total-us):")
+  (for-each
+    (lambda (row)
+      (println (format "  ~a  ~a  ~a" (car row) (cadr row) (caddr row))))
+    (macro-profile-report)))
+
 ;; ── Math ───────────────────────────────────────────────────────────────────
 (define (square x)      (* x x))
 (define (cube x)        (* x x x))
