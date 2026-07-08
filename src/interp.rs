@@ -438,14 +438,11 @@ pub fn setup_builtins(env: &Env) {
 
     // ── gensym ────────────────────────────────────────────────────────────
     b!("gensym", |args| {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static CTR: AtomicU64 = AtomicU64::new(0);
-        let n = CTR.fetch_add(1, Ordering::Relaxed);
         let prefix = match args.first() {
             Some(Value::String(s))|Some(Value::Symbol(s)) => s.clone(),
             _ => "g".to_string(),
         };
-        Ok(Value::Symbol(format!("{}__{}", prefix, n)))
+        Ok(Value::Symbol(crate::env::gensym_name(&prefix)))
     });
 
     // ── Math extras ───────────────────────────────────────────────────────

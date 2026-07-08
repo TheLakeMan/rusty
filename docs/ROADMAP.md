@@ -20,9 +20,9 @@ In 5 years, Rusty will be:
 **Goal:** Establish Rusty as a kernel for writing DSLs that compile to optimized computation graphs.
 
 ### 1.1 Macro System Enhancements
-- [ ] **Hygienic macro improvements**: Full support for macro scoping to prevent variable capture
+- [x] **Hygienic macro improvements**: `defmacro` templates auto-rename let/let*/letrec/lambda/do bindings they introduce to fresh gensyms, so macro-internal names can't capture or be captured by call-site identifiers (see `hygienic_rename` in `src/eval.rs`). Free-identifier capture in the reverse direction (use-site shadowing a macro's free reference) is not addressed.
 - [ ] **Compile-time evaluation**: `eval-when` / `const` expressions that run at macro expansion time
-- [ ] **Symbol tables & gensym pool**: Pre-allocate gensyms for better macro hygiene
+- [x] **Symbol tables & gensym pool**: `gensym` and the hygiene pass now share one counter (`env::gensym_name`) for globally-unique names
 - [ ] **Macro profiler**: Debug and optimize macro expansion performance
 - **Deliverable:** Example DSL that generates optimized list operations (equivalent to JAX list comprehensions)
 

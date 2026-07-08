@@ -1,7 +1,18 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use crate::parser::Expr;
+
+// ── Fresh-name generation ────────────────────────────────────────────────
+// Shared counter backing both the `gensym` builtin and the macro hygiene
+// rename pass, so every generated name is globally unique.
+static GENSYM_CTR: AtomicU64 = AtomicU64::new(0);
+
+pub fn gensym_name(prefix: &str) -> String {
+    let n = GENSYM_CTR.fetch_add(1, Ordering::Relaxed);
+    format!("{}__{}", prefix, n)
+}
 
 /// A Rusty value.
 #[derive(Clone, Debug)]

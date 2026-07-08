@@ -536,7 +536,11 @@ impl Evaluator {
                                     Expr::List(ps) => parse_params(ps)?,
                                     _ => return Err("defmacro: params must be a list".into()),
                                 };
-                                let body = lst[3..].to_vec();
+                                // Hygiene: rename identifiers the macro's own template
+                                // introduces (let/lambda/do bindings inside quasiquote)
+                                // to fresh gensyms, so they can't capture or be captured
+                                // by identifiers from the use site.
+                                let body = lst[3..].iter().map(hygienic_rename_top).collect();
                                 EnvFrame::set(&env, name, Value::Macro { params, rest, body, env: env.clone() });
                                 return Ok(Value::Nil);
                             }
@@ -865,6 +869,151 @@ fn extract_let_parts(list: &[Expr]) -> Result<(Vec<(String, Expr)>, Vec<Expr>), 
 pub fn wrap_begin(mut exprs: Vec<Expr>) -> Expr {
     if exprs.len() == 1 { exprs.remove(0) }
     else { let mut v = vec![Expr::Symbol("begin".into())]; v.extend(exprs); Expr::List(v) }
+}
+
+// ── Macro hygiene ─────────────────────────────────────────────────────────
+//
+// A defmacro body is ordinary code that runs at expansion time; the only
+// part that becomes code at the *use site* is whatever sits inside its
+// `quasiquote` templates. Any identifier the template itself binds via
+// let/let*/letrec/lambda/do (as opposed to one supplied through `,x`/`,@x`
+// from the macro's arguments) is renamed to a fresh gensym once, when the
+// macro is defined. Because every expansion still creates its own env
+// frame, a fixed rename is enough to guarantee the template's internal
+// names can never capture, or be captured by, identifiers coming from the
+// call site — while names supplied via unquote (the user's own bindings)
+// are left completely untouched.
+use std::collections::HashMap;
+
+pub fn hygienic_rename_top(expr: &Expr) -> Expr {
+    match expr {
+        Expr::List(items) if !items.is_empty() => {
+            if let Expr::Symbol(s) = &items[0] {
+                if s == "quasiquote" && items.len() == 2 {
+                    let map = HashMap::new();
+                    return Expr::List(vec![items[0].clone(), hygienic_rename(&items[1], &map)]);
+                }
+            }
+            Expr::List(items.iter().map(hygienic_rename_top).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn fresh(name: &str, map: &mut HashMap<String, String>) -> String {
+    let g = crate::env::gensym_name(name);
+    map.insert(name.to_string(), g.clone());
+    g
+}
+
+fn rename_binding_list(
+    bindings: &[Expr],
+    outer_map: &HashMap<String, String>,
+    child: &mut HashMap<String, String>,
+    sequential: bool,
+) -> Vec<Expr> {
+    let mut out = Vec::new();
+    for b in bindings {
+        if let Expr::List(pair) = b {
+            if pair.len() >= 2 {
+                if let Expr::Symbol(n) = &pair[0] {
+                    // let*/letrec/do steps may see earlier bindings; plain let
+                    // evaluates inits in the outer scope.
+                    let val_map: &HashMap<String, String> = if sequential { child } else { outer_map };
+                    let renamed_init = hygienic_rename(&pair[1], val_map);
+                    let new_name = fresh(n, child);
+                    let mut new_pair = vec![Expr::Symbol(new_name), renamed_init];
+                    if pair.len() == 3 {
+                        new_pair.push(hygienic_rename(&pair[2], child));
+                    }
+                    out.push(Expr::List(new_pair));
+                    continue;
+                }
+            }
+        }
+        out.push(hygienic_rename(b, outer_map));
+    }
+    out
+}
+
+fn hygienic_rename(expr: &Expr, map: &HashMap<String, String>) -> Expr {
+    match expr {
+        Expr::List(items) if !items.is_empty() => {
+            if let Expr::Symbol(head) = &items[0] {
+                match head.as_str() {
+                    "unquote" | "unquote-splicing" => return expr.clone(),
+
+                    // Named let: (let name ((v init)...) body...)
+                    "let" if items.len() >= 3 && matches!(&items[1], Expr::Symbol(_)) => {
+                        if let (Expr::Symbol(loop_name), Expr::List(bindings)) = (&items[1], &items[2]) {
+                            let mut child = map.clone();
+                            let new_loop_name = fresh(loop_name, &mut child);
+                            let new_bindings = rename_binding_list(bindings, map, &mut child, false);
+                            let mut new_items = vec![
+                                items[0].clone(),
+                                Expr::Symbol(new_loop_name),
+                                Expr::List(new_bindings),
+                            ];
+                            for rest in &items[3..] { new_items.push(hygienic_rename(rest, &child)); }
+                            return Expr::List(new_items);
+                        }
+                    }
+
+                    "let" | "let*" | "letrec" | "letrec*" if items.len() >= 2 => {
+                        if let Expr::List(bindings) = &items[1] {
+                            let sequential = head != "let";
+                            let mut child = map.clone();
+                            let new_bindings = rename_binding_list(bindings, map, &mut child, sequential);
+                            let mut new_items = vec![items[0].clone(), Expr::List(new_bindings)];
+                            for rest in &items[2..] { new_items.push(hygienic_rename(rest, &child)); }
+                            return Expr::List(new_items);
+                        }
+                    }
+
+                    "lambda" | "fn" | "λ" if items.len() >= 2 => {
+                        let mut child = map.clone();
+                        let new_params = match &items[1] {
+                            Expr::List(ps) => {
+                                let mut np = Vec::new();
+                                for p in ps {
+                                    match p {
+                                        Expr::Symbol(s) if s == "." => np.push(p.clone()),
+                                        Expr::Symbol(s) => np.push(Expr::Symbol(fresh(s, &mut child))),
+                                        other => np.push(hygienic_rename(other, map)),
+                                    }
+                                }
+                                Expr::List(np)
+                            }
+                            Expr::Symbol(s) => Expr::Symbol(fresh(s, &mut child)),
+                            other => other.clone(),
+                        };
+                        let mut new_items = vec![items[0].clone(), new_params];
+                        for rest in &items[2..] { new_items.push(hygienic_rename(rest, &child)); }
+                        return Expr::List(new_items);
+                    }
+
+                    // (do ((var init step)...) (test result...) body...)
+                    "do" if items.len() >= 3 => {
+                        if let Expr::List(specs) = &items[1] {
+                            let mut child = map.clone();
+                            let new_specs = rename_binding_list(specs, map, &mut child, true);
+                            let mut new_items = vec![items[0].clone(), Expr::List(new_specs)];
+                            for rest in &items[2..] { new_items.push(hygienic_rename(rest, &child)); }
+                            return Expr::List(new_items);
+                        }
+                    }
+
+                    _ => {}
+                }
+            }
+            Expr::List(items.iter().map(|e| hygienic_rename(e, map)).collect())
+        }
+        Expr::Symbol(s) => match map.get(s) {
+            Some(renamed) => Expr::Symbol(renamed.clone()),
+            None => expr.clone(),
+        },
+        other => other.clone(),
+    }
 }
 
 // ── Pattern matching helper ───────────────────────────────────────────────
