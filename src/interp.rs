@@ -841,12 +841,17 @@ pub fn setup_builtins(env: &Env) {
         if rest.len() != params.len() {
             return Err(format!("graph-eval: expected {} arg(s), got {}", params.len(), rest.len()));
         }
-        let nums: Result<Vec<f64>, String> = rest.iter().map(|a| match a {
-            Value::Number(n) => Ok(*n),
-            other => Err(format!("graph-eval: expected a number, got {}", other)),
+        let inputs: Result<Vec<crate::graph_ir::GVal>, String> = rest.iter().map(|a| match a {
+            Value::Number(n) => Ok(crate::graph_ir::GVal::Num(*n)),
+            Value::Tensor { data, shape } =>
+                Ok(crate::graph_ir::GVal::Tensor { data: data.clone(), shape: shape.clone() }),
+            other => Err(format!("graph-eval: expected a number or tensor, got {}", other)),
         }).collect();
         let graph = crate::graph_ir::build(params, &body[0])?;
-        Ok(Value::Number(crate::graph_ir::eval_graph(&crate::graph_ir::optimize(&graph), &nums?)))
+        match crate::graph_ir::eval_graph(&crate::graph_ir::optimize(&graph), &inputs?)? {
+            crate::graph_ir::GVal::Num(n) => Ok(Value::Number(n)),
+            crate::graph_ir::GVal::Tensor { data, shape } => Ok(Value::Tensor { data, shape }),
+        }
     });
 
     // ── Macro profiler ───────────────────────────────────────────────────

@@ -274,6 +274,11 @@ maturin build          # build wheel for distribution
 (graph-node-count (lambda (x) (+ (* x x) (* x x))))  ; => 3 (not 5 — CSE)
 (graph-ir (lambda (x) (+ (* 2 3) x)))                ; => (((0 const 6) (1 param 0) (2 add 0 1)) 2)
 (graph-eval (lambda (x y) (if (> x y) (- x y) (+ x y))) 5 2)  ; => 3
+
+;; Tensor ops flow through the same pipeline (tensors enter via params —
+;; CSE means a shared (matmul x w) is computed once):
+(graph-node-count (lambda (x w) (tensor-add (matmul x w) (matmul x w))))  ; => 4 (not 6)
+(graph-eval (lambda (x w b) (tensor-add (matmul x w) b)) X W B)           ; linear layer, optimized
 ```
 
 ### Agent / Tool Forms
@@ -472,6 +477,10 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 
 ; a linear layer is three calls:
 (define (linear-forward x W b) (tensor-add (matmul x W) b))
+
+; the same expression runs through the Graph IR optimizer too (CSE/DCE) —
+; see the Graph IR section above:
+(graph-eval (lambda (x W b) (tensor-add (matmul x W) b)) X W B)
 ```
 
 ---
