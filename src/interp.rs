@@ -529,6 +529,62 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
+    // ── Bounded exhaustive checking ─────────────────────────────────────────
+    // (check-exhaustive property '((domain1...) (domain2...) ...))
+    // Runs `property` on EVERY combination of the given finite domains (one
+    // domain list per parameter) and returns 'verified, or a list of
+    // counterexamples — each ((args...) reason) where reason is "false" or
+    // the raised error's message. This is exhaustive proof over a finite
+    // state space, not sampling: if it says verified, the property holds
+    // everywhere in the domain. Capped at 1,000,000 combinations so a typo'd
+    // domain can't hang the interpreter.
+    b!("check-exhaustive", |args| {
+        if args.len() != 2 {
+            return Err("check-exhaustive: (check-exhaustive property '((domain...)...))".into());
+        }
+        let property = &args[0];
+        let domains: Vec<Vec<Value>> = match &args[1] {
+            Value::List(ds) => ds.iter().map(|d| match d {
+                Value::List(vs) => Ok(vs.iter().cloned().collect()),
+                _ => Err("check-exhaustive: each domain must be a non-empty list".to_string()),
+            }).collect::<Result<Vec<_>, _>>()?,
+            _ => return Err("check-exhaustive: domains must be a list of lists".into()),
+        };
+        if domains.is_empty() || domains.iter().any(|d| d.is_empty()) {
+            return Err("check-exhaustive: each domain must be a non-empty list".into());
+        }
+        let total: usize = domains.iter().map(|d| d.len()).try_fold(1usize, |acc, n| acc.checked_mul(n))
+            .ok_or("check-exhaustive: state space overflows")?;
+        if total > 1_000_000 {
+            return Err(format!("check-exhaustive: state space too large ({} > 1000000 combinations)", total));
+        }
+        let eval = Evaluator::new();
+        let mut counterexamples = Vec::new();
+        let mut indices = vec![0usize; domains.len()];
+        for _ in 0..total {
+            let combo: Vec<Value> = indices.iter().zip(domains.iter()).map(|(&i, d)| d[i].clone()).collect();
+            let reason = match apply_value(property, &combo, &eval) {
+                Ok(v) if matches!(v, Value::Bool(false) | Value::Nil) => Some("false".to_string()),
+                Ok(_) => None,
+                Err(e) => Some(e),
+            };
+            if let Some(r) = reason {
+                counterexamples.push(list(vec![list(combo), Value::String(r)]));
+            }
+            // odometer increment
+            for pos in (0..indices.len()).rev() {
+                indices[pos] += 1;
+                if indices[pos] < domains[pos].len() { break; }
+                indices[pos] = 0;
+            }
+        }
+        if counterexamples.is_empty() {
+            Ok(Value::Symbol("verified".to_string()))
+        } else {
+            Ok(list(counterexamples))
+        }
+    });
+
     // ── Effect tracking ─────────────────────────────────────────────────────
     b!("check-effects", |args| {
         match args.first() {

@@ -433,6 +433,13 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 (check-effects (lambda (x) (+ x 1)))            ; => pure
 (check-effects (lambda (x) (print x) (+ x 1)))  ; => ("print: performs I/O")
 (effectful? 'set!)                              ; => #t
+
+; Bounded exhaustive checking — proves a property over EVERY combination
+; of finite domains (not sampling); returns 'verified or counterexamples.
+(check-exhaustive (lambda (x y) (= (+ x y) (+ y x)))
+                  '((-2 -1 0 1 2) (-2 -1 0 1 2)))       ; => verified
+(check-exhaustive (lambda (m e) (member (transition m e) modes))
+                  (list modes events))                   ; => verified: transition is total & closed
 ```
 
 ---

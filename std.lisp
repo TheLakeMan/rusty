@@ -122,9 +122,12 @@
   (if (or (null? lst) (not (pred (car lst)))) lst
       (drop-while pred (cdr lst))))
 
+;; Tail-recursive (builds back-to-front) so the evaluator's TCO applies —
+;; the naive cons-position recursion overflowed the stack past ~200 elements.
 (define (range start end)
-  (if (>= start end) '()
-      (cons start (range (+ start 1) end))))
+  (let loop ((i (- end 1)) (acc '()))
+    (if (< i start) acc
+        (loop (- i 1) (cons i acc)))))
 
 (define (iota n)   (range 0 n))
 (define (sum lst)  (foldl + 0 lst))
