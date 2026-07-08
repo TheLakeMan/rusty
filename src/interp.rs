@@ -462,6 +462,45 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
+    // ── Flow-sensitive static type checking ────────────────────────────────
+    b!("check-types", |args| {
+        if args.len() != 2 {
+            return Err("check-types: (check-types (lambda (params...) expr) '((param type)...))".into());
+        }
+        let (params, body) = match &args[0] {
+            Value::Lambda { params, body, .. } => (params, body),
+            _ => return Err("check-types: first argument must be a lambda".into()),
+        };
+        if body.len() != 1 { return Err("check-types: lambda body must be a single expression".into()); }
+        let entries = match &args[1] {
+            Value::List(entries) => entries.clone(),
+            _ => return Err("check-types: second argument must be a list of (param type) pairs".into()),
+        };
+        let mut env = std::collections::HashMap::new();
+        for entry in entries.iter() {
+            let (name, tyname) = match entry {
+                Value::List(pair) if pair.len() == 2 => match (&pair[0], &pair[1]) {
+                    (Value::Symbol(n), Value::Symbol(t)) => (n, t),
+                    _ => return Err("check-types: each type entry must be (param-symbol type-symbol)".into()),
+                },
+                _ => return Err("check-types: each type entry must be (param-symbol type-symbol)".into()),
+            };
+            if !params.iter().any(|p| p == name) {
+                return Err(format!("check-types: '{}' is not a parameter of the given lambda", name));
+            }
+            let ty = crate::type_check::Ty::from_name(tyname)
+                .ok_or_else(|| format!("check-types: unknown type '{}'", tyname))?;
+            env.insert(name.clone(), ty);
+        }
+        let mut errors = Vec::new();
+        crate::type_check::infer(&body[0], &env, &mut errors);
+        if errors.is_empty() {
+            Ok(Value::Symbol("ok".to_string()))
+        } else {
+            Ok(list(errors.into_iter().map(Value::String).collect()))
+        }
+    });
+
     // ── Graph IR ───────────────────────────────────────────────────────────
     b!("graph-ir", |args| {
         match args.first() {

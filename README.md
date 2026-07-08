@@ -417,6 +417,15 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 (define-typed (add-typed (x : number) (y : number)) : number
   (+ x y))
 (add-typed 3 "oops")   ; => Error: expected number, got a different type
+
+; Flow-sensitive static type checking — walks the body WITHOUT running it,
+; narrowing types through if/let. Conservative: unresolvable types are
+; "unknown" and never flagged, so this only reports provable mismatches.
+(check-types (lambda (x) (string-length x)) '((x number)))
+;; => ("string-length: argument 1 is statically known to be number, expected string")
+
+;; narrowing overrides an outer declared type within a branch:
+(check-types (lambda (x) (if (number? x) (+ x 1) 0)) '((x string)))  ; => ok
 ```
 
 ---
