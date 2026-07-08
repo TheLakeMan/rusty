@@ -593,6 +593,16 @@ pub fn setup_builtins(env: &Env) {
             _ => Err("tensor-sum: argument must be a tensor".into()),
         }
     });
+    b!("relu", |args| {
+        match args.first() {
+            Some(Value::Number(n)) => Ok(Value::Number(n.max(0.0))),
+            Some(Value::Tensor { data, shape }) => Ok(Value::Tensor {
+                data: std::rc::Rc::new(data.iter().map(|x| x.max(0.0)).collect()),
+                shape: shape.clone(),
+            }),
+            _ => Err("relu: argument must be a number or tensor".into()),
+        }
+    });
     b!("tensor-map", |args| {
         if args.len() != 2 { return Err("tensor-map: (tensor-map fn tensor)".into()); }
         match &args[1] {
@@ -853,6 +863,40 @@ pub fn setup_builtins(env: &Env) {
             crate::graph_ir::GVal::Tensor { data, shape } => Ok(Value::Tensor { data, shape }),
         }
     });
+    // (graph-grad (lambda (params...) scalar-loss-expr) args...) →
+    //   (loss grad-per-param...)
+    // Reverse-mode autodiff: one backward sweep over the Graph IR yields the
+    // gradient of the loss w.r.t. *every* argument, evaluated in a single
+    // pass over the shared forward+backward graph.
+    b!("graph-grad", |args| {
+        let (params, body, rest) = match args.split_first() {
+            Some((Value::Lambda { params, body, .. }, rest)) => (params, body, rest),
+            _ => return Err("graph-grad: (graph-grad (lambda (params...) loss-expr) args...)".into()),
+        };
+        if body.len() != 1 { return Err("graph-grad: lambda body must be a single expression".into()); }
+        if rest.len() != params.len() {
+            return Err(format!("graph-grad: expected {} arg(s), got {}", params.len(), rest.len()));
+        }
+        let inputs: Result<Vec<crate::graph_ir::GVal>, String> = rest.iter().map(|a| match a {
+            Value::Number(n) => Ok(crate::graph_ir::GVal::Num(*n)),
+            Value::Tensor { data, shape } =>
+                Ok(crate::graph_ir::GVal::Tensor { data: data.clone(), shape: shape.clone() }),
+            other => Err(format!("graph-grad: expected a number or tensor, got {}", other)),
+        }).collect();
+        let forward = crate::graph_ir::optimize(&crate::graph_ir::build(params, &body[0])?);
+        let (grown, grad_nodes) = crate::graph_ir::backward(&forward, params.len())?;
+        let mut outputs = vec![grown.output];
+        outputs.extend(grad_nodes);
+        let (opt, outs) = crate::graph_ir::optimize_outputs(&grown, &outputs);
+        let results = crate::graph_ir::eval_graph_outputs(&opt, &inputs?, &outs)?;
+        if !matches!(results[0], crate::graph_ir::GVal::Num(_)) {
+            return Err("graph-grad: the loss must evaluate to a scalar (use tensor-sum or a mean)".into());
+        }
+        Ok(list(results.into_iter().map(|g| match g {
+            crate::graph_ir::GVal::Num(n) => Value::Number(n),
+            crate::graph_ir::GVal::Tensor { data, shape } => Value::Tensor { data, shape },
+        }).collect()))
+    });
 
     // ── Macro profiler ───────────────────────────────────────────────────
     b!("macro-profile-on", |_| { crate::eval::macro_profile::set_enabled(true); Ok(Value::Nil) });
@@ -925,6 +969,13 @@ pub fn setup_builtins(env: &Env) {
             }
             _ => Err("load-model: (load-model \"path\")".into()),
         }
+    });
+
+    // ── Time ─────────────────────────────────────────────────────────────
+    b!("now-micros", |_| {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map(|d| Value::Number(d.as_micros() as f64))
+            .map_err(|e| format!("now-micros: {}", e))
     });
 
     // ── I/O ───────────────────────────────────────────────────────────────
