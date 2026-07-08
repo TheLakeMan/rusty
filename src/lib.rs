@@ -21,6 +21,7 @@ mod eval;
 mod interp;
 mod arena;
 mod rust_jit;
+mod graph_ir;
 
 use eval::Evaluator;
 use interp::{make_env, run_code, print_repr};

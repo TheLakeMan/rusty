@@ -462,6 +462,44 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
+    // ── Graph IR ───────────────────────────────────────────────────────────
+    b!("graph-ir", |args| {
+        match args.first() {
+            Some(Value::Lambda { params, body, .. }) => {
+                if body.len() != 1 { return Err("graph-ir: lambda body must be a single expression".into()); }
+                let graph = crate::graph_ir::build(params, &body[0])?;
+                Ok(crate::graph_ir::to_value(&crate::graph_ir::optimize(&graph)))
+            }
+            _ => Err("graph-ir: (graph-ir (lambda (params...) expr)) — argument must be a lambda".into()),
+        }
+    });
+    b!("graph-node-count", |args| {
+        match args.first() {
+            Some(Value::Lambda { params, body, .. }) => {
+                if body.len() != 1 { return Err("graph-node-count: lambda body must be a single expression".into()); }
+                let graph = crate::graph_ir::build(params, &body[0])?;
+                Ok(Value::Number(crate::graph_ir::optimize(&graph).nodes.len() as f64))
+            }
+            _ => Err("graph-node-count: argument must be a lambda".into()),
+        }
+    });
+    b!("graph-eval", |args| {
+        let (params, body, rest) = match args.split_first() {
+            Some((Value::Lambda { params, body, .. }, rest)) => (params, body, rest),
+            _ => return Err("graph-eval: (graph-eval (lambda (params...) expr) args...)".into()),
+        };
+        if body.len() != 1 { return Err("graph-eval: lambda body must be a single expression".into()); }
+        if rest.len() != params.len() {
+            return Err(format!("graph-eval: expected {} arg(s), got {}", params.len(), rest.len()));
+        }
+        let nums: Result<Vec<f64>, String> = rest.iter().map(|a| match a {
+            Value::Number(n) => Ok(*n),
+            other => Err(format!("graph-eval: expected a number, got {}", other)),
+        }).collect();
+        let graph = crate::graph_ir::build(params, &body[0])?;
+        Ok(Value::Number(crate::graph_ir::eval_graph(&crate::graph_ir::optimize(&graph), &nums?)))
+    });
+
     // ── Macro profiler ───────────────────────────────────────────────────
     b!("macro-profile-on", |_| { crate::eval::macro_profile::set_enabled(true); Ok(Value::Nil) });
     b!("macro-profile-off", |_| { crate::eval::macro_profile::set_enabled(false); Ok(Value::Nil) });
