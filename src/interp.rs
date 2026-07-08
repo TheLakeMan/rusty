@@ -1112,7 +1112,7 @@ pub fn setup_builtins(env: &Env) {
 
     // ── Help ──────────────────────────────────────────────────────────────
     b!("help", |_| {
-        println!("Rusty v0.10.0 — Lisp in Rust  |  (help) for this message");
+        println!("Rusty v{} — Lisp in Rust  |  (help) for this message", env!("CARGO_PKG_VERSION"));
         println!("Special: define def set set! lambda if cond let let* letrec begin");
         println!("         and or quote defmacro do try-catch match load load-relative");
         println!("Arith:   + - * / mod expt abs sqrt floor ceiling round max min gcd");

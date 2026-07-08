@@ -24,7 +24,7 @@ maturin develop            # install into active venv
 python3 -c "import rusty; print(rusty.eval('(+ 1 2)'))"
 ```
 
-**Versioning**: bump `version` in `Cargo.toml` as part of every commit that changes behavior — minor (`0.X.0`) for a feature/roadmap item, patch (`0.x.Y`) for fixes; docs-only commits don't bump. Rebuild after bumping so `Cargo.lock` stays in sync, and include both files in the same commit.
+**Versioning**: bump `version` in `Cargo.toml` as part of every commit that changes behavior — minor (`0.X.0`) for a feature/roadmap item, patch (`0.x.Y`) for fixes; docs-only commits don't bump. Rebuild after bumping so `Cargo.lock` stays in sync, and include both files in the same commit. Also update the `**Version:**` line at the top of README.md — it's the one spot that can't track `Cargo.toml` automatically (the REPL banner and `(help)` use `env!("CARGO_PKG_VERSION")`, so they follow for free).
 
 There is no `cargo test` suite — correctness is checked by running a `.lisp` file and diffing stdout against a checked-in expected-output file. When adding new language behavior, extend `tests.lisp` (or `new-features.lisp`) and update the matching `expected_*.txt`, or add a new pair and a `run_test` line in `run_tests.sh`.
 
