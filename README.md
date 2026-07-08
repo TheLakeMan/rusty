@@ -218,6 +218,8 @@ maturin build          # build wheel for distribution
 (do ((var init step)...) (test result...) body...)  ; do loop
 (quote x) 'x                          ; literal data
 (quasiquote x) `x  ,splice  ,@splice  ; template / unquote
+(eval-when (phase...) body...)         ; run body now (phase unused outside macros);
+                                        ; inside defmacro, runs once at definition time
 ```
 
 ### Macros

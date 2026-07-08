@@ -500,6 +500,23 @@ impl Evaluator {
                                 cur = lst[last].clone(); continue;
                             }
 
+                            // (eval-when (phase...) body...) — runs body immediately,
+                            // like `begin`. Rusty has no separate compile/load phase,
+                            // so `phase` is accepted but not inspected here; the one
+                            // place it changes anything is `defmacro`, which runs a
+                            // top-level `eval-when` once at *definition* time instead
+                            // of once per expansion (see the defmacro handler).
+                            "eval-when" => {
+                                if lst.len() < 2 { return Err("eval-when: (eval-when (phase...) body...)".into()); }
+                                if !matches!(&lst[1], Expr::List(_)) {
+                                    return Err("eval-when: phase spec must be a list".into());
+                                }
+                                if lst.len() == 2 { return Ok(Value::Nil); }
+                                let last = lst.len() - 1;
+                                for e in &lst[2..last] { self.eval(e, &env)?; }
+                                cur = lst[last].clone(); continue;
+                            }
+
                             // ── Definitions ───────────────────────────────
                             "define" => { return self.eval_define(lst, &env); }
                             "def"    => { return self.eval_def(lst, &env); }
@@ -536,12 +553,33 @@ impl Evaluator {
                                     Expr::List(ps) => parse_params(ps)?,
                                     _ => return Err("defmacro: params must be a list".into()),
                                 };
+                                // Compile-time evaluation: a top-level (eval-when (...) body...)
+                                // in the macro's body runs once, right now, in def_env — not on
+                                // every future expansion. `define`s inside it (e.g. a precomputed
+                                // lookup table) land in def_env, which becomes the macro's closure
+                                // env, so every expansion can see them via ordinary lookup.
+                                let def_env = EnvFrame::new(Some(env.clone()));
+                                let mut retained = Vec::new();
+                                for stmt in &lst[3..] {
+                                    if let Expr::List(items) = stmt {
+                                        if let Some(Expr::Symbol(s)) = items.first() {
+                                            if s == "eval-when" && items.len() >= 2 && matches!(&items[1], Expr::List(_)) {
+                                                for e in &items[2..] { self.eval(e, &def_env)?; }
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                    retained.push(stmt.clone());
+                                }
+                                if retained.is_empty() {
+                                    return Err("defmacro: body must have an expression after any eval-when blocks".into());
+                                }
                                 // Hygiene: rename identifiers the macro's own template
                                 // introduces (let/lambda/do bindings inside quasiquote)
                                 // to fresh gensyms, so they can't capture or be captured
                                 // by identifiers from the use site.
-                                let body = lst[3..].iter().map(hygienic_rename_top).collect();
-                                EnvFrame::set(&env, name, Value::Macro { params, rest, body, env: env.clone() });
+                                let body = retained.iter().map(hygienic_rename_top).collect();
+                                EnvFrame::set(&env, name, Value::Macro { params, rest, body, env: def_env });
                                 return Ok(Value::Nil);
                             }
 

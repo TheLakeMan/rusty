@@ -21,7 +21,7 @@ In 5 years, Rusty will be:
 
 ### 1.1 Macro System Enhancements
 - [x] **Hygienic macro improvements**: `defmacro` templates auto-rename let/let*/letrec/lambda/do bindings they introduce to fresh gensyms, so macro-internal names can't capture or be captured by call-site identifiers (see `hygienic_rename` in `src/eval.rs`). Free-identifier capture in the reverse direction (use-site shadowing a macro's free reference) is not addressed.
-- [ ] **Compile-time evaluation**: `eval-when` / `const` expressions that run at macro expansion time
+- [x] **Compile-time evaluation**: `(eval-when (phase...) body...)` is a general special form (runs `body` immediately, like `begin` — Rusty has no separate compile/load phase so `phase` is accepted but unused outside macros). Inside a `defmacro` body specifically, a top-level `eval-when` runs once at *definition* time (not once per expansion), in the env that becomes the macro's closure — see `src/eval.rs`'s `defmacro` handler. A separate `const` special form was not added: `std.lisp` already defines `const` as the K-combinator (`(define (const x) (lambda args x))`, used in functional pipelines), so introducing a `const` keyword would have shadowed it.
 - [x] **Symbol tables & gensym pool**: `gensym` and the hygiene pass now share one counter (`env::gensym_name`) for globally-unique names
 - [ ] **Macro profiler**: Debug and optimize macro expansion performance
 - **Deliverable:** Example DSL that generates optimized list operations (equivalent to JAX list comprehensions)
