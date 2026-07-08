@@ -262,6 +262,37 @@ maturin build          # build wheel for distribution
 (d/dx 3)   ; => 6
 ```
 
+#### C ABI export — call Rusty-compiled code from anywhere
+
+Every `defrust` function is a plain `extern "C"` symbol in an ordinary shared
+library — there is no bridge to build, because the artifact `rustc` produces is
+already callable from C, Python, PyTorch custom ops, or anything else with an
+FFI. Nothing calls back into Rusty; the `.so` is self-contained.
+
+- **Location**: `~/.rusty/jit-cache/<symbol>_<source-hash>.so` (`.dylib` on
+  macOS, `.dll` on Windows), with the generated `.rs` source next to it.
+- **Symbol name**: the Lisp name, sanitized — `rusty_` prefix, every
+  non-`[A-Za-z0-9_]` character replaced by `_` (so `fib-native` →
+  `rusty_fib_native`).
+- **Signature** (one fixed shape regardless of arity):
+  `extern "C" fn(args: *const f64, len: usize) -> f64` — pass the arguments
+  as a `f64` array plus its length.
+
+```python
+# verified end-to-end: no Rusty process involved
+import ctypes
+lib = ctypes.CDLL("/home/you/.rusty/jit-cache/rusty_fib_native_<hash>.so")
+f = lib.rusty_fib_native
+f.restype  = ctypes.c_double
+f.argtypes = [ctypes.POINTER(ctypes.c_double), ctypes.c_size_t]
+args = (ctypes.c_double * 1)(30.0)
+f(args, 1)   # => 832040.0, same native code Rusty calls
+```
+
+The cache is keyed by a hash of the generated source, so the path is stable
+until the function's definition changes; re-running `defrust` prints nothing
+new and reuses the same `.so`.
+
 ### Graph IR
 
 ```lisp
