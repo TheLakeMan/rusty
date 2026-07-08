@@ -10,24 +10,20 @@ pub enum Value {
     Bool(bool),
     String(String),
     Symbol(String),
-    List(Vec<Value>),
-    /// Native built-in function
+    List(Rc<Vec<Value>>),           // Rc for cheap sharing — clone is O(1)
     Builtin(&'static str, fn(&[Value]) -> Result<Value, String>),
-    /// User-defined lambda with captured env
     Lambda {
         params: Vec<String>,
         rest:   Option<String>,
         body:   Vec<Expr>,
         env:    Env,
     },
-    /// defmacro — like Lambda but args passed unevaluated
     Macro {
         params: Vec<String>,
         rest:   Option<String>,
         body:   Vec<Expr>,
         env:    Env,
     },
-    /// Tool for agent use
     Tool {
         name: String,
         description: String,
@@ -78,7 +74,7 @@ pub type Env = Rc<RefCell<EnvFrame>>;
 
 #[derive(Debug)]
 pub struct EnvFrame {
-    pub vars:   HashMap<String, Value>,   // made public for now
+    pub vars:   HashMap<String, Value>,
     pub parent: Option<Env>,
 }
 
@@ -122,8 +118,28 @@ impl EnvFrame {
         }
         if let Some(r) = rest {
             let tail: Vec<Value> = args[params.len()..].to_vec();
-            EnvFrame::set(&child, r.clone(), Value::List(tail));
+            EnvFrame::set(&child, r.clone(), list(tail));
         }
         Ok(child)
+    }
+}
+
+// ── List helpers ──────────────────────────────────────────────────────────────
+// Use these everywhere instead of Value::List(vec![...]) directly.
+// list() wraps a Vec in Rc — clone is O(1) reference count bump.
+
+pub fn list(vals: Vec<Value>) -> Value {
+    Value::List(Rc::new(vals))
+}
+
+pub fn cons(head: Value, tail: Value) -> Value {
+    match tail {
+        Value::List(rc) => {
+            let mut v = vec![head];
+            v.extend_from_slice(&rc);
+            list(v)
+        }
+        Value::Nil => list(vec![head]),
+        other      => list(vec![head, other]),
     }
 }

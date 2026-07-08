@@ -3,6 +3,7 @@ mod parser;
 mod env;
 mod eval;
 mod interp;
+mod arena;
 
 use env::Value;
 use eval::Evaluator;

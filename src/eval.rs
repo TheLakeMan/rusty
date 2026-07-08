@@ -1,5 +1,5 @@
 use crate::parser::Expr;
-use crate::env::{Env, EnvFrame, Value};
+use crate::env::{Env, EnvFrame, Value, list, cons};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -107,29 +107,29 @@ impl Evaluator {
                         .ok_or_else(|| format!("Undefined: '{}'", s));
                 }
 
-                Expr::List(list) => {
-                    if list.is_empty() { return Ok(Value::Nil); }
+                Expr::List(lst) => {
+                    if lst.is_empty() { return Ok(Value::Nil); }
 
-                    if let Expr::Symbol(head) = &list[0] {
+                    if let Expr::Symbol(head) = &lst[0] {
                         match head.as_str() {
 
                             // ── LLM Call ─────────────────────────────────
                             "llm" => {
-                                if list.len() < 2 {
+                                if lst.len() < 2 {
                                     return Err("(llm prompt [temperature] [max-tokens])".into());
                                 }
-                                let prompt = match self.eval(&list[1], &env)? {
+                                let prompt = match self.eval(&lst[1], &env)? {
                                     Value::String(s) => s,
                                     _ => return Err("llm: prompt must be a string".into()),
                                 };
-                                let temp = if list.len() > 2 {
-                                    match self.eval(&list[2], &env)? {
+                                let temp = if lst.len() > 2 {
+                                    match self.eval(&lst[2], &env)? {
                                         Value::Number(n) => n as f32,
                                         _ => 0.7,
                                     }
                                 } else { 0.7 };
-                                let max_t = if list.len() > 3 {
-                                    match self.eval(&list[3], &env)? {
+                                let max_t = if lst.len() > 3 {
+                                    match self.eval(&lst[3], &env)? {
                                         Value::Number(n) => Some(n as u32),
                                         _ => None,
                                     }
@@ -144,20 +144,20 @@ impl Evaluator {
 
                             // ── deftool ───────────────────────────────────
                             "deftool" => {
-                                if list.len() < 4 {
+                                if lst.len() < 4 {
                                     return Err("deftool: (deftool name (params) \"description\" body...)".into());
                                 }
-                                let name = sym_name(&list[1], "deftool")?;
-                                let params = match &list[2] {
+                                let name = sym_name(&lst[1], "deftool")?;
+                                let params = match &lst[2] {
                                     Expr::List(ps) => ps.iter().map(|p| sym_name(p, "deftool param"))
                                         .collect::<Result<Vec<_>, _>>()?,
                                     _ => return Err("deftool: params must be a list".into()),
                                 };
-                                let description = match self.eval(&list[3], &env)? {
+                                let description = match self.eval(&lst[3], &env)? {
                                     Value::String(s) => s,
                                     _ => return Err("deftool: description must be a string".into()),
                                 };
-                                let body = list[4..].to_vec();
+                                let body = lst[4..].to_vec();
                                 EnvFrame::set(&env, name.clone(), Value::Tool {
                                     name, description, params, body, env: env.clone(),
                                 });
@@ -166,15 +166,15 @@ impl Evaluator {
 
                             // ── tool-call ─────────────────────────────────
                             "tool-call" => {
-                                if list.len() < 2 {
+                                if lst.len() < 2 {
                                     return Err("tool-call: (tool-call \"name\" args...)".into());
                                 }
-                                let name = match self.eval(&list[1], &env)? {
+                                let name = match self.eval(&lst[1], &env)? {
                                     Value::String(s) => s,
                                     Value::Symbol(s) => s,
                                     _ => return Err("tool-call: name must be a string".into()),
                                 };
-                                let args: Result<Vec<Value>, _> = list[2..]
+                                let args: Result<Vec<Value>, _> = lst[2..]
                                     .iter().map(|a| self.eval(a, &env)).collect();
                                 let args = args?;
                                 match EnvFrame::get(&env, &name) {
@@ -205,10 +205,10 @@ impl Evaluator {
                                     let frame = env.borrow();
                                     for (name, v) in &frame.vars {
                                         if let Value::Tool { description, params, .. } = v {
-                                            out.push(Value::List(vec![
+                                            out.push(crate::env::list(vec![
                                                 Value::Symbol(name.clone()),
                                                 Value::String(description.clone()),
-                                                Value::List(params.iter().map(|p| Value::Symbol(p.clone())).collect()),
+                                                crate::env::list(params.iter().map(|p| Value::Symbol(p.clone())).collect()),
                                             ]));
                                         }
                                     }
@@ -217,7 +217,7 @@ impl Evaluator {
                                     }
                                 }
                                 collect_tools(&env, &mut tools);
-                                return Ok(Value::List(tools));
+                                return Ok(list(tools));
                             }
 
                             // ── react-loop goal max-steps) ────────────────────
@@ -225,15 +225,15 @@ impl Evaluator {
                             // The LLM reasons about which tool to call,
                             // Rusty executes it, result feeds back to LLM.
                             "react-loop" => {
-                                if list.len() < 2 {
+                                if lst.len() < 2 {
                                     return Err("react-loop: (react-loop goal [max-steps])".into());
                                 }
-                                let goal = match self.eval(&list[1], &env)? {
+                                let goal = match self.eval(&lst[1], &env)? {
                                     Value::String(s) => s,
                                     other => format!("{}", other),
                                 };
-                                let max_steps = if list.len() > 2 {
-                                    match self.eval(&list[2], &env)? {
+                                let max_steps = if lst.len() > 2 {
+                                    match self.eval(&lst[2], &env)? {
                                         Value::Number(n) => n as usize,
                                         _ => 10,
                                     }
@@ -328,10 +328,10 @@ impl Evaluator {
 
                             // ── (load "file.lisp") ──────────────────────
                             "load" | "load-relative" => {
-                                if list.len() != 2 {
+                                if lst.len() != 2 {
                                     return Err(format!("{}: expects a filename", head));
                                 }
-                                let path_val = self.eval(&list[1], &env)?;
+                                let path_val = self.eval(&lst[1], &env)?;
                                 let path_str = match &path_val {
                                     Value::String(s) => s.clone(),
                                     _ => return Err(format!("{}: filename must be a string", head)),
@@ -345,20 +345,20 @@ impl Evaluator {
 
                             // ── (try-catch body (err) handler) ──────────
                             "try-catch" => {
-                                if list.len() < 4 {
+                                if lst.len() < 4 {
                                     return Err("try-catch: (try-catch body (err) handler)".into());
                                 }
-                                match self.eval(&list[1], &env) {
+                                match self.eval(&lst[1], &env) {
                                     Ok(v) => return Ok(v),
                                     Err(e) => {
                                         let catch_env = EnvFrame::new(Some(env.clone()));
-                                        if let Expr::List(vars) = &list[2] {
+                                        if let Expr::List(vars) = &lst[2] {
                                             if let Some(Expr::Symbol(name)) = vars.first() {
                                                 EnvFrame::set(&catch_env, name.clone(),
                                                     Value::String(e));
                                             }
                                         }
-                                        cur = list[3].clone();
+                                        cur = lst[3].clone();
                                         env = catch_env;
                                         continue;
                                     }
@@ -367,12 +367,12 @@ impl Evaluator {
 
                             // ── (match expr (pat body)...) ───────────────
                             "match" => {
-                                if list.len() < 3 {
+                                if lst.len() < 3 {
                                     return Err("match: (match expr (pattern body)...)".into());
                                 }
-                                let subject = self.eval(&list[1], &env)?;
+                                let subject = self.eval(&lst[1], &env)?;
                                 let mut matched = None;
-                                'clauses: for clause in &list[2..] {
+                                'clauses: for clause in &lst[2..] {
                                     if let Expr::List(c) = clause {
                                         if c.len() < 2 { continue; }
                                         let pat = &c[0];
@@ -404,23 +404,23 @@ impl Evaluator {
 
                             // ── Quote / Quasiquote ────────────────────────
                             "quote" => {
-                                if list.len() != 2 { return Err("quote: expects 1 arg".into()); }
-                                return Ok(expr_to_value(&list[1]));
+                                if lst.len() != 2 { return Err("quote: expects 1 arg".into()); }
+                                return Ok(expr_to_value(&lst[1]));
                             }
 
                             "quasiquote" => {
-                                if list.len() != 2 { return Err("quasiquote: expects 1 arg".into()); }
-                                return self.expand_quasiquote(&list[1], &env);
+                                if lst.len() != 2 { return Err("quasiquote: expects 1 arg".into()); }
+                                return self.expand_quasiquote(&lst[1], &env);
                             }
 
                             // ── Conditionals ──────────────────────────────
                             "if" => {
-                                if list.len() < 3 { return Err("if: (if test then [else])".into()); }
-                                let test_val = self.eval(&list[1], &env)?;
+                                if lst.len() < 3 { return Err("if: (if test then [else])".into()); }
+                                let test_val = self.eval(&lst[1], &env)?;
                                 if is_truthy(&test_val) {
-                                    cur = list[2].clone();
-                                } else if list.len() > 3 {
-                                    cur = list[3].clone();
+                                    cur = lst[2].clone();
+                                } else if lst.len() > 3 {
+                                    cur = lst[3].clone();
                                 } else {
                                     return Ok(Value::Nil);
                                 }
@@ -428,30 +428,30 @@ impl Evaluator {
                             }
 
                             "when" => {
-                                if list.len() < 3 { return Err("when: (when test body...)".into()); }
-                                let test_val = self.eval(&list[1], &env)?;
+                                if lst.len() < 3 { return Err("when: (when test body...)".into()); }
+                                let test_val = self.eval(&lst[1], &env)?;
                                 if is_truthy(&test_val) {
-                                    let last = list.len() - 1;
-                                    for e in &list[2..last] { self.eval(e, &env)?; }
-                                    cur = list[last].clone(); continue;
+                                    let last = lst.len() - 1;
+                                    for e in &lst[2..last] { self.eval(e, &env)?; }
+                                    cur = lst[last].clone(); continue;
                                 }
                                 return Ok(Value::Nil);
                             }
 
                             "unless" => {
-                                if list.len() < 3 { return Err("unless: (unless test body...)".into()); }
-                                let test_val = self.eval(&list[1], &env)?;
+                                if lst.len() < 3 { return Err("unless: (unless test body...)".into()); }
+                                let test_val = self.eval(&lst[1], &env)?;
                                 if !is_truthy(&test_val) {
-                                    let last = list.len() - 1;
-                                    for e in &list[2..last] { self.eval(e, &env)?; }
-                                    cur = list[last].clone(); continue;
+                                    let last = lst.len() - 1;
+                                    for e in &lst[2..last] { self.eval(e, &env)?; }
+                                    cur = lst[last].clone(); continue;
                                 }
                                 return Ok(Value::Nil);
                             }
 
                             "cond" => {
                                 let mut found: Option<Expr> = None;
-                                'cond: for clause in &list[1..] {
+                                'cond: for clause in &lst[1..] {
                                     if let Expr::List(c) = clause {
                                         if c.is_empty() { continue; }
                                         let is_else = matches!(&c[0], Expr::Symbol(s) if s == "else");
@@ -473,41 +473,41 @@ impl Evaluator {
 
                             // ── Boolean short-circuit ─────────────────────
                             "and" => {
-                                if list.len() == 1 { return Ok(Value::Bool(true)); }
-                                let last = list.len() - 1;
-                                for e in &list[1..last] {
+                                if lst.len() == 1 { return Ok(Value::Bool(true)); }
+                                let last = lst.len() - 1;
+                                for e in &lst[1..last] {
                                     let v = self.eval(e, &env)?;
                                     if !is_truthy(&v) { return Ok(v); }
                                 }
-                                cur = list[last].clone(); continue;
+                                cur = lst[last].clone(); continue;
                             }
 
                             "or" => {
-                                if list.len() == 1 { return Ok(Value::Bool(false)); }
-                                let last = list.len() - 1;
-                                for e in &list[1..last] {
+                                if lst.len() == 1 { return Ok(Value::Bool(false)); }
+                                let last = lst.len() - 1;
+                                for e in &lst[1..last] {
                                     let v = self.eval(e, &env)?;
                                     if is_truthy(&v) { return Ok(v); }
                                 }
-                                cur = list[last].clone(); continue;
+                                cur = lst[last].clone(); continue;
                             }
 
                             // ── Sequencing ────────────────────────────────
                             "begin" => {
-                                if list.len() == 1 { return Ok(Value::Nil); }
-                                let last = list.len() - 1;
-                                for e in &list[1..last] { self.eval(e, &env)?; }
-                                cur = list[last].clone(); continue;
+                                if lst.len() == 1 { return Ok(Value::Nil); }
+                                let last = lst.len() - 1;
+                                for e in &lst[1..last] { self.eval(e, &env)?; }
+                                cur = lst[last].clone(); continue;
                             }
 
                             // ── Definitions ───────────────────────────────
-                            "define" => { return self.eval_define(list, &env); }
-                            "def"    => { return self.eval_def(list, &env); }
+                            "define" => { return self.eval_define(lst, &env); }
+                            "def"    => { return self.eval_def(lst, &env); }
 
                             "set!" => {
-                                if list.len() != 3 { return Err("set!: (set! name value)".into()); }
-                                let name = sym_name(&list[1], "set!")?;
-                                let val  = self.eval(&list[2], &env)?;
+                                if lst.len() != 3 { return Err("set!: (set! name value)".into()); }
+                                let name = sym_name(&lst[1], "set!")?;
+                                let val  = self.eval(&lst[2], &env)?;
                                 if !EnvFrame::set_existing(&env, &name, val) {
                                     return Err(format!("set!: undefined variable '{}'", name));
                                 }
@@ -516,9 +516,9 @@ impl Evaluator {
 
                             // Legacy SimpleLisp alias — creates variable if not yet defined
                             "set" => {
-                                if list.len() != 3 { return Err("set: (set name value)".into()); }
-                                let name = sym_name(&list[1], "set")?;
-                                let val  = self.eval(&list[2], &env)?;
+                                if lst.len() != 3 { return Err("set: (set name value)".into()); }
+                                let name = sym_name(&lst[1], "set")?;
+                                let val  = self.eval(&lst[2], &env)?;
                                 if !EnvFrame::set_existing(&env, &name, val.clone()) {
                                     EnvFrame::set(&env, name, val);
                                 }
@@ -526,17 +526,17 @@ impl Evaluator {
                             }
 
                             // ── Lambdas ───────────────────────────────────
-                            "lambda" | "fn" | "λ" => { return self.eval_lambda(list, &env); }
+                            "lambda" | "fn" | "λ" => { return self.eval_lambda(lst, &env); }
 
                             // ── Macros ────────────────────────────────────
                             "defmacro" | "define-macro" => {
-                                if list.len() < 4 { return Err("defmacro: (defmacro name (params) body...)".into()); }
-                                let name = sym_name(&list[1], "defmacro")?;
-                                let (params, rest) = match &list[2] {
+                                if lst.len() < 4 { return Err("defmacro: (defmacro name (params) body...)".into()); }
+                                let name = sym_name(&lst[1], "defmacro")?;
+                                let (params, rest) = match &lst[2] {
                                     Expr::List(ps) => parse_params(ps)?,
                                     _ => return Err("defmacro: params must be a list".into()),
                                 };
-                                let body = list[3..].to_vec();
+                                let body = lst[3..].to_vec();
                                 EnvFrame::set(&env, name, Value::Macro { params, rest, body, env: env.clone() });
                                 return Ok(Value::Nil);
                             }
@@ -544,40 +544,40 @@ impl Evaluator {
                             // ── Let forms ─────────────────────────────────
                             "let" => {
                                 // Named let: (let loop ((var val)...) body...)
-                                if list.len() > 2 {
-                                    if let Expr::Symbol(lname) = &list[1] {
+                                if lst.len() > 2 {
+                                    if let Expr::Symbol(lname) = &lst[1] {
                                         let lname = lname.clone();
-                                        let (e, new_env) = self.eval_named_let(&lname, list, &env)?;
+                                        let (e, new_env) = self.eval_named_let(&lname, lst, &env)?;
                                         cur = e; env = new_env; continue;
                                     }
                                 }
-                                let (e, new_env) = self.eval_let(list, &env)?;
+                                let (e, new_env) = self.eval_let(lst, &env)?;
                                 cur = e; env = new_env; continue;
                             }
 
                             "let*" => {
-                                let (e, new_env) = self.eval_let_star(list, &env)?;
+                                let (e, new_env) = self.eval_let_star(lst, &env)?;
                                 cur = e; env = new_env; continue;
                             }
 
                             "letrec" | "letrec*" => {
-                                let (e, new_env) = self.eval_letrec(list, &env)?;
+                                let (e, new_env) = self.eval_letrec(lst, &env)?;
                                 cur = e; env = new_env; continue;
                             }
 
                             // ── Do loop ───────────────────────────────────
-                            "do" => { return self.eval_do(list, &env); }
+                            "do" => { return self.eval_do(lst, &env); }
 
                             _ => {} // fall through to macro / function call
                         }
                     }
 
                     // ── Macro expansion ──
-                    if let Expr::Symbol(s) = &list[0] {
+                    if let Expr::Symbol(s) = &lst[0] {
                         if let Some(Value::Macro { params, rest, body, env: mac_env }) =
                             EnvFrame::get(&env, s)
                         {
-                            let arg_vals: Vec<Value> = list[1..].iter().map(expr_to_value).collect();
+                            let arg_vals: Vec<Value> = lst[1..].iter().map(expr_to_value).collect();
                             let mac_child = EnvFrame::extend(&mac_env, &params, &rest, arg_vals)?;
                             let last = body.len() - 1;
                             for e in &body[..last] { self.eval(e, &mac_child)?; }
@@ -588,8 +588,8 @@ impl Evaluator {
                     }
 
                     // ── Function call ──
-                    let func = self.eval(&list[0], &env)?;
-                    let args: Result<Vec<Value>, _> = list[1..].iter()
+                    let func = self.eval(&lst[0], &env)?;
+                    let args: Result<Vec<Value>, _> = lst[1..].iter()
                         .map(|a| self.eval(a, &env)).collect();
                     let args = args?;
 
@@ -613,21 +613,21 @@ impl Evaluator {
     // ── quasiquote ────────────────────────────────────────────────────────
     fn expand_quasiquote(&self, expr: &Expr, env: &Env) -> Result<Value, String> {
         match expr {
-            Expr::List(list) if !list.is_empty() => {
+            Expr::List(qlst) if !qlst.is_empty() => {
                 // (unquote x) → evaluate x
-                if let Expr::Symbol(s) = &list[0] {
-                    if s == "unquote" && list.len() == 2 {
-                        return self.eval(&list[1], env);
+                if let Expr::Symbol(s) = &qlst[0] {
+                    if s == "unquote" && qlst.len() == 2 {
+                        return self.eval(&qlst[1], env);
                     }
                 }
                 // Build list, splicing ,@ items
                 let mut result = Vec::new();
-                for item in list {
+                for item in qlst {
                     if let Expr::List(inner) = item {
                         if let Some(Expr::Symbol(s)) = inner.first() {
                             if s == "unquote-splicing" && inner.len() == 2 {
                                 match self.eval(&inner[1], env)? {
-                                    Value::List(vs) => { result.extend(vs); continue; }
+                                    Value::List(vs) => { result.extend(vs.iter().cloned()); continue; }
                                     Value::Nil      => continue,
                                     v => return Err(format!(",@: expected list, got {}", v)),
                                 }
@@ -636,7 +636,7 @@ impl Evaluator {
                     }
                     result.push(self.expand_quasiquote(item, env)?);
                 }
-                Ok(Value::List(result))
+                Ok(crate::env::list(result))
             }
             other => Ok(expr_to_value(other)),
         }
@@ -804,7 +804,7 @@ pub fn expr_to_value(e: &Expr) -> Value {
         Expr::Bool(b)   => Value::Bool(*b),
         Expr::String(s) => Value::String(s.clone()),
         Expr::Symbol(s) => Value::Symbol(s.clone()),
-        Expr::List(vs)  => Value::List(vs.iter().map(expr_to_value).collect()),
+        Expr::List(vs)  => list(vs.iter().map(expr_to_value).collect()),
         Expr::Nil       => Value::Nil,
     }
 }
@@ -937,7 +937,7 @@ pub fn match_pattern(pat: &Expr, val: &Value, bindings: &mut Vec<(String, Value)
                     if let Value::List(xs) = val {
                         if xs.is_empty() { return false; }
                         let h = xs[0].clone();
-                        let t = Value::List(xs[1..].to_vec());
+                        let t = list(xs[1..].to_vec());
                         let save = bindings.len();
                         if match_pattern(&pats[1], &h, bindings)
                             && match_pattern(&pats[2], &t, bindings) {
@@ -968,7 +968,7 @@ pub fn match_pattern(pat: &Expr, val: &Value, bindings: &mut Vec<(String, Value)
                         }
                     }
                     // Bind rest variable to remaining items
-                    let rest_val = Value::List(vals[dp..].to_vec());
+                    let rest_val = list(vals[dp..].to_vec());
                     if !match_pattern(&pats[dp+1], &rest_val, bindings) {
                         bindings.truncate(save);
                         return false;
@@ -994,3 +994,10 @@ pub fn match_pattern(pat: &Expr, val: &Value, bindings: &mut Vec<(String, Value)
         _ => false,
     }
 }
+
+// ── Arena helpers (future optimization) ──────────────────────────────────────
+// Currently wraps list() — wire to arena when GC is activated.
+#[allow(dead_code)]
+pub fn arena_list(items: Vec<Value>) -> Value { list(items) }
+#[allow(dead_code)]
+pub fn arena_cons(head: Value, tail: Value) -> Value { cons(head, tail) }

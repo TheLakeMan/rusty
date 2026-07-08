@@ -1,0 +1,20 @@
+;; ─────────────────────────────────────────────────────────────────────────────
+;; loop.lisp — Entry point (loads everything once)
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(load "loop-core.lisp")
+(load "loop-questions.lisp")
+
+(print "")
+(print "╔════════════════════════════════════╗")
+(print "║           L O O P  v0.2            ║")
+(print "║   A memory vessel for the living.  ║")
+(print "╚════════════════════════════════════╝")
+(print "")
+(print "  (loop-start \"Name\")     — begin new interview")
+(print "  (loop-say \"...\")        — give a response")
+(print "  (loop-pause)             — save and pause")
+(print "  (loop-resume \"id\")      — resume a session")
+(print "  (loop-status)            — current session info")
+(print "  (loop-sessions)          — list all sessions")
+(print "")

@@ -19,6 +19,7 @@ mod parser;
 mod env;
 mod eval;
 mod interp;
+mod arena;
 
 use eval::Evaluator;
 use interp::{make_env, run_code, print_repr};

@@ -3,7 +3,7 @@
 
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::env::{Env, EnvFrame, Value};
+use crate::env::{Env, EnvFrame, Value, list, cons};
 use crate::eval::Evaluator;
 
 // ── Core run helper ───────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ pub fn value_equal(a: &Value, b: &Value) -> bool {
         (Value::Symbol(x),  Value::Symbol(y))  => x == y,
         (Value::Nil,        Value::Nil)        => true,
         (Value::List(xs),   Value::List(ys))   =>
-            xs.len() == ys.len() && xs.iter().zip(ys).all(|(a,b)| value_equal(a,b)),
+            xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(a,b)| value_equal(a,b)),
         _ => false,
     }
 }
@@ -181,13 +181,9 @@ pub fn setup_builtins(env: &Env) {
     alias!("gt", ">"  ); alias!("lt","<"); alias!("ge",">="); alias!("le","<=");
 
     // ── Lists ─────────────────────────────────────────────────────────────
-    b!("cons",  |args| {
+    b!("cons", |args| {
         if args.len()!=2{return Err("cons: 2 args".into());}
-        match &args[1] {
-            Value::List(xs) => { let mut r=vec![args[0].clone()]; r.extend_from_slice(xs); Ok(Value::List(r)) }
-            Value::Nil      => Ok(Value::List(vec![args[0].clone()])),
-            _               => Ok(Value::List(vec![args[0].clone(), args[1].clone()])),
-        }
+        Ok(cons(args[0].clone(), args[1].clone()))
     });
     b!("car",   |args| match args.first() {
         Some(Value::List(xs)) if !xs.is_empty() => Ok(xs[0].clone()),
@@ -195,11 +191,11 @@ pub fn setup_builtins(env: &Env) {
         _ => Err("car: not a pair".into()),
     });
     b!("cdr",   |args| match args.first() {
-        Some(Value::List(xs)) if !xs.is_empty() => Ok(Value::List(xs[1..].to_vec())),
+        Some(Value::List(xs)) if !xs.is_empty() => Ok(list(xs[1..].to_vec())),
         Some(Value::Nil) => Err("cdr: empty list".into()),
         _ => Err("cdr: not a pair".into()),
     });
-    b!("list",  |args| Ok(Value::List(args.to_vec())));
+    b!("list",  |args| Ok(list(args.to_vec())));
     b!("null?", |args| Ok(Value::Bool(match args.first() {
         Some(Value::Nil)|None => true,
         Some(Value::List(v)) => v.is_empty(),
@@ -216,15 +212,15 @@ pub fn setup_builtins(env: &Env) {
         let mut out = Vec::new();
         for a in args {
             match a {
-                Value::List(xs) => out.extend_from_slice(xs),
+                Value::List(xs) => out.extend_from_slice(&xs),
                 Value::Nil      => {}
                 _ => return Err(format!("append: not a list: {}", a)),
             }
         }
-        Ok(Value::List(out))
+        Ok(list(out))
     });
     b!("reverse",|args| match args.first() {
-        Some(Value::List(xs)) => Ok(Value::List(xs.iter().cloned().rev().collect())),
+        Some(Value::List(xs)) => Ok(list(xs.iter().cloned().rev().collect())),
         Some(Value::Nil)      => Ok(Value::Nil),
         _ => Err("reverse: not a list".into()),
     });
@@ -242,7 +238,7 @@ pub fn setup_builtins(env: &Env) {
         if args.len()!=2{return Err("member: 2 args".into());}
         if let Value::List(xs)=&args[1] {
             let idx = xs.iter().position(|x| value_equal(x,&args[0]));
-            Ok(match idx { Some(i)=>Value::List(xs[i..].to_vec()), None=>Value::Bool(false) })
+            Ok(match idx { Some(i)=>list(xs[i..].to_vec()), None=>Value::Bool(false) })
         } else { Err("member: second arg must be a list".into()) }
     });
     b!("list-tail",|args| {
@@ -250,33 +246,33 @@ pub fn setup_builtins(env: &Env) {
         if let (Value::List(xs),Value::Number(n))=(&args[0],&args[1]) {
             let i=*n as usize;
             if i>xs.len(){return Err(format!("list-tail: index {} too large",i));}
-            Ok(Value::List(xs[i..].to_vec()))
+            Ok(list(xs[i..].to_vec()))
         } else { Err("list-tail: (list-tail list n)".into()) }
     });
     b!("map",|args| {
         if args.len()!=2{return Err("map: 2 args".into());}
         let xs = match &args[1] {
             Value::List(xs) => xs.clone(),
-            Value::Nil      => return Ok(Value::List(vec![])),
+            Value::Nil      => return Ok(list(vec![])),
             _ => return Err("map: second arg must be a list".into()),
         };
         let eval = Evaluator::new();
         let results: Result<Vec<Value>,_> = xs.iter().map(|x| apply_value(&args[0],&[x.clone()],&eval)).collect();
-        Ok(Value::List(results?))
+        Ok(list(results?))
     });
     b!("filter",|args| {
         if args.len()!=2{return Err("filter: 2 args".into());}
         let xs = match &args[1] {
             Value::List(xs) => xs.clone(),
-            Value::Nil      => return Ok(Value::List(vec![])),
+            Value::Nil      => return Ok(list(vec![])),
             _ => return Err("filter: second arg must be a list".into()),
         };
         let eval = Evaluator::new();
         let mut out = Vec::new();
-        for x in xs {
+        for x in xs.iter().cloned() {
             if matches!(apply_value(&args[0],&[x.clone()],&eval)?, Value::Bool(false)|Value::Nil) {} else { out.push(x); }
         }
-        Ok(Value::List(out))
+        Ok(list(out))
     });
     b!("for-each",|args| {
         if args.len()!=2{return Err("for-each: 2 args".into());}
@@ -286,7 +282,7 @@ pub fn setup_builtins(env: &Env) {
             _ => return Err("for-each: second arg must be a list".into()),
         };
         let eval = Evaluator::new();
-        for x in xs { apply_value(&args[0],&[x],&eval)?; }
+        for x in xs.iter().cloned() { apply_value(&args[0],&[x.clone()],&eval)?; }
         Ok(Value::Nil)
     });
     b!("foldl",|args| {
@@ -294,7 +290,7 @@ pub fn setup_builtins(env: &Env) {
         let xs = match &args[2] { Value::List(xs)=>xs.clone(), _=>return Err("foldl: third arg must be a list".into()) };
         let eval = Evaluator::new();
         let mut acc = args[1].clone();
-        for x in xs { acc = apply_value(&args[0],&[x,acc],&eval)?; }
+        for x in xs.iter().cloned() { acc = apply_value(&args[0],&[x,acc],&eval)?; }
         Ok(acc)
     });
     b!("foldr",|args| {
@@ -302,7 +298,7 @@ pub fn setup_builtins(env: &Env) {
         let xs = match &args[2] { Value::List(xs)=>xs.clone(), _=>return Err("foldr: third arg must be a list".into()) };
         let eval = Evaluator::new();
         let mut acc = args[1].clone();
-        for x in xs.into_iter().rev() { acc = apply_value(&args[0],&[x,acc],&eval)?; }
+        for x in xs.iter().cloned().rev() { acc = apply_value(&args[0],&[x,acc],&eval)?; }
         Ok(acc)
     });
     b!("apply",|args| {
@@ -310,7 +306,7 @@ pub fn setup_builtins(env: &Env) {
         let last = args.last().unwrap();
         let mut call_args: Vec<Value> = args[1..args.len()-1].to_vec();
         match last {
-            Value::List(xs) => call_args.extend_from_slice(xs),
+            Value::List(xs) => call_args.extend_from_slice(&xs),
             Value::Nil      => {}
             _ => return Err("apply: last arg must be a list".into()),
         }
@@ -361,7 +357,7 @@ pub fn setup_builtins(env: &Env) {
         match args.first() {
             Some(Value::List(xs)) => {
                 let mut out = String::new();
-                for v in xs { match v { Value::String(s)=>out.push_str(s), other=>out.push_str(&print_repr(other)) } }
+                for v in xs.iter() { match v { Value::String(s)=>out.push_str(s), other=>out.push_str(&print_repr(other)) } }
                 Ok(Value::String(out))
             }
             _ => Err("string-append-list: expected a list".into()),
@@ -409,7 +405,7 @@ pub fn setup_builtins(env: &Env) {
     });
     b!("string->list", |args| {
         if let Some(Value::String(s))=args.first(){
-            Ok(Value::List(s.chars().map(|c| Value::String(c.to_string())).collect()))
+            Ok(list(s.chars().map(|c| Value::String(c.to_string())).collect()))
         }else{Err("string->list: not a string".into())}
     });
     b!("str", |args| {
@@ -589,7 +585,7 @@ pub fn setup_builtins(env: &Env) {
             .filter(|l| l.trim().starts_with("(define "))
             .map(|l| Value::String(l.trim().to_string()))
             .collect();
-        Ok(Value::List(entries))
+        Ok(list(entries))
     });
 
     b!("memory-path", |_args| {
@@ -663,22 +659,22 @@ pub fn json_decode(s: &str) -> Result<Value, String> {
     }
     if s.starts_with('[') && s.ends_with(']') {
         let inner = s[1..s.len()-1].trim();
-        if inner.is_empty() { return Ok(Value::List(vec![])); }
+        if inner.is_empty() { return Ok(list(vec![])); }
         let vals: Result<Vec<Value>,_> = json_split(inner)?.iter().map(|i| json_decode(i)).collect();
-        return Ok(Value::List(vals?));
+        return Ok(list(vals?));
     }
     if s.starts_with('{') && s.ends_with('}') {
         let inner = s[1..s.len()-1].trim();
-        if inner.is_empty() { return Ok(Value::List(vec![])); }
+        if inner.is_empty() { return Ok(list(vec![])); }
         let mut alist = Vec::new();
         for pair in json_split(inner)? {
             if let Some(colon) = find_json_colon(pair.trim()) {
                 let key = json_decode(pair[..colon].trim())?;
                 let val = json_decode(pair[colon+1..].trim())?;
-                alist.push(Value::List(vec![key, val]));
+                alist.push(list(vec![key, val]));
             }
         }
-        return Ok(Value::List(alist));
+        return Ok(list(alist));
     }
     Err(format!("Cannot parse JSON: {}", &s[..s.len().min(40)]))
 }
