@@ -42,6 +42,19 @@ pub enum Value {
         body: Vec<Expr>,
         env: Env,
     },
+    // A `defrust`-compiled function: real Rust, compiled via rustc and
+    // dynamically loaded. `fn_ptr` is a raw `extern "C" fn(*const f64, usize)
+    // -> f64` transmuted to a data pointer (dodges fighting libloading's
+    // Symbol lifetime — see eval.rs's `rust_jit` module for the call site).
+    // `lib` is kept alive only to keep the .so mapped; it's never touched
+    // again after load.
+    Native {
+        name:  String,
+        arity: usize,
+        #[allow(dead_code)] // never read — held only to keep the .so mapped
+        lib:     Rc<libloading::Library>,
+        fn_ptr:  *const (),
+    },
     Nil,
 }
 
@@ -75,6 +88,7 @@ impl std::fmt::Display for Value {
                 write!(f, ")>")
             }
             Value::Tool { name, .. } => write!(f, "#<tool:{}>", name),
+            Value::Native { name, arity, .. } => write!(f, "#<native:{}/{}>", name, arity),
             Value::Nil => write!(f, "()"),
         }
     }

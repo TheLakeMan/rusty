@@ -327,8 +327,9 @@ pub fn setup_builtins(env: &Env) {
     b!("list?",      |args| Ok(Value::Bool(matches!(args.first(), Some(Value::List(_))|Some(Value::Nil)))));
     b!("pair?",      |args| Ok(Value::Bool(matches!(args.first(), Some(Value::List(v)) if !v.is_empty()))));
     b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
-        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})|Some(Value::Tool{..})))));
+        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})|Some(Value::Tool{..})|Some(Value::Native{..})))));
     b!("macro?",     |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Macro{..})))));
+    b!("native?",    |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Native{..})))));
     b!("type-of",    |args| Ok(Value::Symbol(match args.first() {
         Some(Value::Number(_))   => "number",
         Some(Value::Bool(_))     => "boolean",
@@ -339,7 +340,8 @@ pub fn setup_builtins(env: &Env) {
         Some(Value::Builtin(..)) => "builtin",
         Some(Value::Lambda{..})  => "lambda",
         Some(Value::Macro{..})   => "macro",
-        Some(Value::Tool{..})    => "tool",
+        Some(Value::Tool{..})   => "tool",
+        Some(Value::Native{..}) => "native",
         None                     => "nil",
     }.to_string())));
 
@@ -443,6 +445,21 @@ pub fn setup_builtins(env: &Env) {
             _ => "g".to_string(),
         };
         Ok(Value::Symbol(crate::env::gensym_name(&prefix)))
+    });
+
+    // ── Symbolic differentiation ──────────────────────────────────────────
+    b!("grad", |args| {
+        match args.first() {
+            Some(Value::Lambda { params, rest, body, env }) => {
+                if params.is_empty() { return Err("grad: lambda must have at least one parameter".into()); }
+                if body.len() != 1 { return Err("grad: lambda body must be a single expression".into()); }
+                let derivative = crate::eval::symbolic_derivative(&body[0], &params[0])?;
+                Ok(Value::Lambda {
+                    params: params.clone(), rest: rest.clone(), body: vec![derivative], env: env.clone(),
+                })
+            }
+            _ => Err("grad: (grad (lambda (x ...) expr)) — argument must be a lambda".into()),
+        }
     });
 
     // ── Macro profiler ───────────────────────────────────────────────────

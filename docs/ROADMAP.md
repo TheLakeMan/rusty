@@ -27,12 +27,11 @@ In 5 years, Rusty will be:
 - **Deliverable:** Example DSL that generates optimized list operations (equivalent to JAX list comprehensions)
 
 ### 1.2 Code Generation & Symbolic Computation
-- [ ] **S-expression to Rust codegen**: Macros that emit Rust code (via procedural macros or text generation)
-- [ ] **Symbolic differentiation**: Implement automatic differentiation rules as Lisp macros
-  - `(grad (lambda (x) (+ (* x x) 1)))` → generates numerical gradient functions
+- [x] **S-expression to Rust codegen**: `(defrust name (params...) body)` (`src/rust_jit.rs`) compiles a restricted numeric subset (numbers, params, `+ - * /`, `if` with comparisons/and/or/not, self-recursive calls) to real Rust, via `rustc --crate-type cdylib -O` shelled out as a subprocess, cached by a hash of the generated source, and dynamically loaded with `libloading`. Calling a `defrust` function marshals Lisp numbers across a fixed `extern "C" fn(*const f64, usize) -> f64` ABI. Measured: tree-walked `fib(30)` ~8.2s vs. the `defrust` version ~0.007s once compiled (~0.067s including the one-time compile) — real, not simulated, speedup. **Cut from v1** (deliberately, not an oversight): calls between *separate* `defrust` functions — that needs cross-`.so` linking, which is its own can of worms — so only self-recursion is supported, not composition.
+- [x] **Symbolic differentiation**: `(grad (lambda (x) expr))` (`grad` builtin → `eval::symbolic_derivative`) differentiates `expr` via AST rewriting (sum/product/quotient/power/chain rules for `+ - * / expt sqrt`, plus `if`) with respect to the lambda's first parameter, returning a new callable Lambda — true symbolic differentiation, not numeric approximation or execution tracing. Verified against hand-computed derivatives for polynomial, reciprocal, sqrt, product-rule, quotient-rule, and conditional (abs-like) cases.
 - [ ] **Graph IR**: Internal representation for computation DAGs (inspired by XLA, TVM)
 - [ ] **Graph optimization passes**: Dead code elimination, constant folding, common subexpression elimination
-- **Deliverable:** Benchmark showing rusty-generated code matches or exceeds PyTorch performance on a simple neural layer
+- **Deliverable:** Benchmark showing rusty-generated code matches or exceeds PyTorch performance on a simple neural layer — the `defrust` fib benchmark above is a first data point in this direction; a neural-layer-scale benchmark needs Graph IR first.
 
 ### 1.3 Neuro-Symbolic Bridge Layer (Library)
 - [ ] **Constraint embedding**: Primitives for embedding logical constraints into function definitions

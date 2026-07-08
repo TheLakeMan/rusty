@@ -245,6 +245,23 @@ maturin build          # build wheel for distribution
 (macro-profile-off)
 ```
 
+### Native Codegen (defrust) & Symbolic Differentiation
+
+```lisp
+;; Compiles a restricted numeric subset (numbers, params, + - * /, if,
+;; self-recursive calls) to real Rust via rustc, and dynamically loads it.
+;; ~1000x faster than the tree-walked equivalent once compiled (measured
+;; on fib(30): ~8.2s interpreted vs. ~0.007s compiled, cached).
+(defrust fib (n)
+  (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+(fib 30)   ; => 832040, runs as native code
+
+;; True symbolic differentiation (AST rewriting via calculus rules), not
+;; numeric approximation — grad returns a new callable derivative function.
+(define d/dx (grad (lambda (x) (+ (* x x) 1))))   ; d/dx[x^2 + 1] = 2x
+(d/dx 3)   ; => 6
+```
+
 ### Agent / Tool Forms
 
 ```lisp

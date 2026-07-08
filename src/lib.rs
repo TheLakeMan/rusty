@@ -20,6 +20,7 @@ mod env;
 mod eval;
 mod interp;
 mod arena;
+mod rust_jit;
 
 use eval::Evaluator;
 use interp::{make_env, run_code, print_repr};

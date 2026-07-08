@@ -4,6 +4,7 @@ mod env;
 mod eval;
 mod interp;
 mod arena;
+mod rust_jit;
 
 use env::Value;
 use eval::Evaluator;

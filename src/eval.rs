@@ -583,6 +583,20 @@ impl Evaluator {
                                 return Ok(Value::Nil);
                             }
 
+                            // ── defrust: codegen + compile + load real Rust ──
+                            "defrust" => {
+                                if lst.len() != 4 { return Err("defrust: (defrust name (params...) body)".into()); }
+                                let name = sym_name(&lst[1], "defrust")?;
+                                let params = match &lst[2] {
+                                    Expr::List(ps) => ps.iter().map(|p| sym_name(p, "defrust param"))
+                                        .collect::<Result<Vec<_>, _>>()?,
+                                    _ => return Err("defrust: params must be a list".into()),
+                                };
+                                let native = crate::rust_jit::compile_and_load(&name, &params, &lst[3])?;
+                                EnvFrame::set(&env, name, native);
+                                return Ok(Value::Nil);
+                            }
+
                             // ── Let forms ─────────────────────────────────
                             "let" => {
                                 // Named let: (let loop ((var val)...) body...)
@@ -646,6 +660,16 @@ impl Evaluator {
                             cur = body[last].clone();
                             env = child;
                             continue;
+                        }
+                        Value::Native { name, arity, fn_ptr, .. } => {
+                            if args.len() != arity {
+                                return Err(format!("{}: expected {} arg(s), got {}", name, arity, args.len()));
+                            }
+                            let nums: Result<Vec<f64>, String> = args.iter().map(|a| match a {
+                                Value::Number(n) => Ok(*n),
+                                other => Err(format!("{}: expected a number, got {}", name, other)),
+                            }).collect();
+                            return Ok(Value::Number(crate::rust_jit::call(fn_ptr, &nums?)));
                         }
                         other => return Err(format!("Not callable: {}", other)),
                     }
@@ -909,6 +933,98 @@ fn extract_let_parts(list: &[Expr]) -> Result<(Vec<(String, Expr)>, Vec<Expr>), 
 pub fn wrap_begin(mut exprs: Vec<Expr>) -> Expr {
     if exprs.len() == 1 { exprs.remove(0) }
     else { let mut v = vec![Expr::Symbol("begin".into())]; v.extend(exprs); Expr::List(v) }
+}
+
+// ── Symbolic differentiation ──────────────────────────────────────────────
+//
+// `(grad (lambda (x) expr))` (builtin, interp.rs) differentiates `expr`
+// symbolically with respect to the lambda's first parameter and returns a
+// new callable Lambda for the derivative — no numeric approximation, no
+// execution tracing, just AST rewriting via the standard calculus rules.
+// Free variables (anything that isn't `var`) are treated as constants.
+pub fn symbolic_derivative(expr: &Expr, var: &str) -> Result<Expr, String> {
+    match expr {
+        Expr::Number(_) => Ok(Expr::Number(0.0)),
+        Expr::Symbol(s) if s == var => Ok(Expr::Number(1.0)),
+        Expr::Symbol(_) => Ok(Expr::Number(0.0)),
+        Expr::List(items) if !items.is_empty() => {
+            let head = match &items[0] {
+                Expr::Symbol(s) => s.as_str(),
+                _ => return Err("grad: unsupported expression (expected an operator)".into()),
+            };
+            let args = &items[1..];
+            match head {
+                "+" if !args.is_empty() => {
+                    let ds = args.iter().map(|a| symbolic_derivative(a, var)).collect::<Result<Vec<_>, _>>()?;
+                    Ok(sum_expr(ds))
+                }
+                "-" if !args.is_empty() => {
+                    let ds = args.iter().map(|a| symbolic_derivative(a, var)).collect::<Result<Vec<_>, _>>()?;
+                    Ok(Expr::List(std::iter::once(Expr::Symbol("-".into())).chain(ds).collect()))
+                }
+                "*" if args.len() >= 2 => {
+                    // Sum, over each term, of (product of all terms with that one replaced by its derivative).
+                    let mut terms = Vec::new();
+                    for i in 0..args.len() {
+                        let mut factors = Vec::with_capacity(args.len());
+                        for (j, a) in args.iter().enumerate() {
+                            factors.push(if i == j { symbolic_derivative(a, var)? } else { a.clone() });
+                        }
+                        terms.push(Expr::List(std::iter::once(Expr::Symbol("*".into())).chain(factors).collect()));
+                    }
+                    Ok(sum_expr(terms))
+                }
+                "/" if args.len() == 1 => {
+                    // d/dx[1/a] = -a' / a^2
+                    let da = symbolic_derivative(&args[0], var)?;
+                    Ok(list2("/", Expr::List(vec![Expr::Symbol("-".into()), da]),
+                        list2("*", args[0].clone(), args[0].clone())))
+                }
+                "/" if args.len() == 2 => {
+                    // Quotient rule: (a'b - ab') / b^2
+                    let da = symbolic_derivative(&args[0], var)?;
+                    let db = symbolic_derivative(&args[1], var)?;
+                    let numer = Expr::List(vec![Expr::Symbol("-".into()),
+                        list2("*", da, args[1].clone()), list2("*", args[0].clone(), db)]);
+                    Ok(list2("/", numer, list2("*", args[1].clone(), args[1].clone())))
+                }
+                "expt" if args.len() == 2 => {
+                    let n = match &args[1] {
+                        Expr::Number(n) => *n,
+                        _ => return Err("grad: expt only supports a constant numeric exponent".into()),
+                    };
+                    let da = symbolic_derivative(&args[0], var)?;
+                    // n * a^(n-1) * a'
+                    let pow = list2("expt", args[0].clone(), Expr::Number(n - 1.0));
+                    Ok(Expr::List(vec![Expr::Symbol("*".into()), Expr::Number(n), list2("*", pow, da)]))
+                }
+                "sqrt" if args.len() == 1 => {
+                    // a' / (2 * sqrt(a))
+                    let da = symbolic_derivative(&args[0], var)?;
+                    let denom = list2("*", Expr::Number(2.0), Expr::List(vec![Expr::Symbol("sqrt".into()), args[0].clone()]));
+                    Ok(list2("/", da, denom))
+                }
+                "if" if args.len() == 3 => {
+                    let dthen = symbolic_derivative(&args[1], var)?;
+                    let delse = symbolic_derivative(&args[2], var)?;
+                    Ok(Expr::List(vec![Expr::Symbol("if".into()), args[0].clone(), dthen, delse]))
+                }
+                other => Err(format!("grad: unsupported operator '{}' in body", other)),
+            }
+        }
+        _ => Err("grad: unsupported expression in body".into()),
+    }
+}
+
+fn list2(op: &str, a: Expr, b: Expr) -> Expr { Expr::List(vec![Expr::Symbol(op.into()), a, b]) }
+
+fn sum_expr(mut terms: Vec<Expr>) -> Expr {
+    terms.retain(|t| !matches!(t, Expr::Number(n) if *n == 0.0));
+    match terms.len() {
+        0 => Expr::Number(0.0),
+        1 => terms.into_iter().next().unwrap(),
+        _ => Expr::List(std::iter::once(Expr::Symbol("+".into())).chain(terms).collect()),
+    }
 }
 
 // ── Macro expansion profiler ──────────────────────────────────────────────
