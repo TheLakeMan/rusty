@@ -289,21 +289,31 @@
     `(assert (,pred ,val-expr) ,(string-append "expected " (symbol->string type) ", got a different type"))))
 
 (define (typed-param-name p) (if (pair? p) (car p) p))
+(define (typed-param-type p) (if (pair? p) (caddr p) 'unknown))
 (define (typed-param-check p)
   (if (pair? p) (type-check-form (typed-param-name p) (caddr p)) #f))
 
+;; Expansion also calls register-signature so check-types (the static
+;; checker) can see through calls to this function — declared types would
+;; otherwise vanish after macro expansion. Unannotated positions register
+;; as 'unknown (never flagged).
 (defmacro define-typed (sig . rest)
   (let ((name (car sig)) (params (cdr sig)))
     (let ((checks (filter (lambda (x) x) (map typed-param-check params)))
-          (names  (map typed-param-name params)))
+          (names  (map typed-param-name params))
+          (ptypes (map typed-param-type params)))
       (if (and (pair? rest) (equal? (car rest) ':))
           (let ((rtype (cadr rest)) (body (cddr rest)) (result (gensym "result")))
-            `(define (,name ,@names)
-               ,@checks
-               (let ((,result (begin ,@body)))
-                 ,(type-check-form result rtype)
-                 ,result)))
-          `(define (,name ,@names) ,@checks ,@rest)))))
+            `(begin
+               (register-signature (quote ,name) (quote ,ptypes) (quote ,rtype))
+               (define (,name ,@names)
+                 ,@checks
+                 (let ((,result (begin ,@body)))
+                   ,(type-check-form result rtype)
+                   ,result))))
+          `(begin
+             (register-signature (quote ,name) (quote ,ptypes) (quote unknown))
+             (define (,name ,@names) ,@checks ,@rest))))))
 
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch

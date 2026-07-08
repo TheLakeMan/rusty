@@ -463,6 +463,34 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Flow-sensitive static type checking ────────────────────────────────
+    // Called by define-typed's expansion (std.lisp) to record a declared
+    // signature so check-types can see through user-defined calls.
+    // 'unknown is accepted for unannotated params/returns.
+    b!("register-signature", |args| {
+        if args.len() != 3 {
+            return Err("register-signature: (register-signature 'name '(param-types...) 'return-type)".into());
+        }
+        let name = match &args[0] {
+            Value::Symbol(s) | Value::String(s) => s.clone(),
+            _ => return Err("register-signature: name must be a symbol".into()),
+        };
+        let parse_ty = |v: &Value| -> Result<crate::type_check::Ty, String> {
+            match v {
+                Value::Symbol(t) if t == "unknown" => Ok(crate::type_check::Ty::Unknown),
+                Value::Symbol(t) => crate::type_check::Ty::from_name(t)
+                    .ok_or_else(|| format!("register-signature: unknown type '{}'", t)),
+                _ => Err("register-signature: types must be symbols".into()),
+            }
+        };
+        let params = match &args[1] {
+            Value::List(ts) => ts.iter().map(&parse_ty).collect::<Result<Vec<_>, _>>()?,
+            Value::Nil => vec![],
+            _ => return Err("register-signature: param types must be a list".into()),
+        };
+        let ret = parse_ty(&args[2])?;
+        crate::type_check::register_signature(&name, params, ret);
+        Ok(Value::Nil)
+    });
     b!("check-types", |args| {
         if args.len() != 2 {
             return Err("check-types: (check-types (lambda (params...) expr) '((param type)...))".into());

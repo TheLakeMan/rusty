@@ -41,6 +41,27 @@ impl Ty {
 
 pub type TyEnv = HashMap<String, Ty>;
 
+// ── Cross-checker signature registry ─────────────────────────────────────
+// `define-typed` (std.lisp) registers each declared signature here at
+// definition time via the `register-signature` builtin, so this static
+// checker and the runtime contracts share one source of truth. Before this
+// existed, every user-defined call inferred as `Unknown`; now a call to a
+// `define-typed` function checks args against its declared param types and
+// infers its declared return type. Unannotated params/returns register as
+// `Unknown` and behave exactly as before (never flagged).
+thread_local! {
+    static SIGNATURES: std::cell::RefCell<HashMap<String, (Vec<Ty>, Ty)>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+pub fn register_signature(name: &str, params: Vec<Ty>, ret: Ty) {
+    SIGNATURES.with(|s| { s.borrow_mut().insert(name.to_string(), (params, ret)); });
+}
+
+fn lookup_signature(name: &str) -> Option<(Vec<Ty>, Ty)> {
+    SIGNATURES.with(|s| s.borrow().get(name).cloned())
+}
+
 /// Known operator -> (expected arg type, if checkable; return type).
 fn builtin_signature(op: &str) -> Option<(Option<Ty>, Ty)> {
     match op {
@@ -145,7 +166,22 @@ pub fn infer(expr: &Expr, env: &TyEnv, errors: &mut Vec<String>) -> Ty {
                                 ret
                             }
                             Some((None, ret)) => ret,
-                            None => Ty::Unknown, // unrecognized/user-defined call — conservative
+                            None => match lookup_signature(head) {
+                                // A define-typed function: check args against its
+                                // declared param types, infer its declared return.
+                                Some((param_tys, ret)) => {
+                                    for (i, (at, expected)) in arg_types.iter().zip(param_tys.iter()).enumerate() {
+                                        if *at != Ty::Unknown && *expected != Ty::Unknown && at != expected {
+                                            errors.push(format!(
+                                                "{}: argument {} is statically known to be {}, expected {}",
+                                                head, i + 1, at.name(), expected.name()
+                                            ));
+                                        }
+                                    }
+                                    ret
+                                }
+                                None => Ty::Unknown, // unrecognized call — conservative
+                            },
                         }
                     }
                 }
