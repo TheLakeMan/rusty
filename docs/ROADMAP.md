@@ -13,6 +13,10 @@ In 5 years, Rusty will be:
 - **The canonical tool** for building neuro-symbolic systems that combine neural networks with logic-driven reasoning
 - **Proven in production** across 2-3 high-impact domains (formal verification, robotics control, or scientific computing)
 
+### Design Constraint: No External Runtime Dependencies
+
+Rusty is a DSL, not a research platform accumulating a dependency graph. Every capability — code generation, verification, tensor/ML support — gets built **inside Rusty itself**, using only what it already ships with (the Rust toolchain at build time; no external services, toolchains, or heavyweight runtime dependencies). This is why `defrust` shells out to `rustc` — a build tool already required to build Rusty itself — rather than depending on Lean 4, TLA+, or a Python/PyTorch runtime at execution time: the constraint is what makes Rusty embeddable — on a robot, on constrained hardware, anywhere — without dragging in someone else's toolchain. Where a phase below reads like "integrate with X," read it as "build a self-contained equivalent of whatever X gives you, at whatever scope is honestly achievable without X" — external systems are fine as a *benchmark comparison* (Phase 1's PyTorch performance target) but not as a *dependency*.
+
 ---
 
 ## Phase 1: Symbolic Transformation Layer (Months 0–12)
@@ -45,15 +49,15 @@ In 5 years, Rusty will be:
 
 **Goal:** Make Rusty the language for provably correct AI.
 
-### 2.1 Formal Reasoning Integration
-**Deferred, not started** — every item here needs the project owner to pick a real external toolchain/format (which Lean 4 version and interop mechanism? TLA+ how, exactly?) plus likely a new network- or toolchain-facing dependency. Revisit once those choices are made; skipping ahead to 2.2/2.3, which are self-contained interpreter/library work like everything in Phase 1.
-- [ ] **Lean 4 interop**: Call Lean proofs from Rusty code; verify Rusty functions in Lean
-  - `(lean-verify (lambda (n) (< n 1000000)) "theorem_name")`
-- [ ] **Proof synthesis**: Automatic proof generation for agent tool correctness
-- [ ] **Model checking**: Bounded model checking for agent behavior (using tools like TLA+)
-- **Deliverable:** A suite of tools with attached machine-readable proofs; agent that can verify its own actions are safe
+### 2.1 Self-Contained Verification
+No external theorem prover, no external model checker. "Provably correct" here means Rusty's own contract/analysis system — `defun-constrained`/`logic-loss` (1.3) and `define-typed`/`check-types`/`check-effects` (2.2) already *are* that system — extended to cover more ground, plus reusing the LLM-agent loop Rusty already has (`llm`/`react-loop`, Phase 1) as a proposal mechanism with Rusty's own checkers as the verifier. Never a cloud API, never someone else's toolchain — this replaces the earlier "Lean 4 / TLA+" framing entirely, not just the implementation of it.
+- [ ] **Proof-by-checker loop**: use `react-loop` to propose candidate implementations against a spec expressed as `defun-constrained` invariants plus `check-types`/`check-effects` constraints, rejecting any candidate the existing checkers can't verify. This is the self-contained replacement for "proof synthesis" — the "prover" is Rusty's own static/runtime checkers, not an SMT solver or Lean.
+- [ ] **Bounded exhaustive checking**: for functions over small/finite/discrete state spaces (a robot's mode machine, a tool's argument enum), exhaustively verify a declared invariant holds across every reachable state via a self-built brute-force/BFS walk of the state space. This is the self-contained, narrower-scope replacement for "model checking" — it won't scale to continuous/infinite state spaces the way TLA+ does; that's the deliberate tradeoff for staying dependency-free, not an oversight.
+- [ ] **Cross-checker registry**: connect `define-typed`'s declared return types into `check-types` (a gap called out in 2.2 — right now every user-defined call statically infers as `Unknown`) so static and runtime checking share one source of truth, and extend `check-effects`'s classification as new builtins are added. This is the "make 2.2 airtight" work, instead of reaching for a new external tool.
+- **Deliverable:** A function whose safety was previously "trust the tests" gets a Rusty-native proof of a stated invariant, using only what Rusty already ships with.
 
 ### 2.2 Static Analysis & Type System
+Everything here was already built self-contained, before "no external runtime dependencies" was written down explicitly above — it's the working example the constraint in the Vision section is describing, not a retrofit.
 - [x] **Gradual typing**: `(define-typed (name (p1 : t1) (p2 : t2) untyped-p3 ...) : return-type body...)` (std.lisp, `define`/`lambda` themselves untouched — opt-in). `ti`/`return-type` name an existing `<type>?` predicate; checked as **runtime contracts at call time** (not static analysis — see the two items below, which are the actual static half of this section and remain undone). Verified: correct calls pass through untyped, a wrong param type and a wrong return type both raise a clear "expected X, got a different type" instead of silently miscomputing. Hit and fixed a real bug along the way: the macro's own `__result` temp crossed an `unquote` boundary in a way the hygiene pass (1.1) couldn't see through, so it renamed the binding but not a reference generated by a helper function — fixed the same way `swap!`/`repeat` already do, with `(gensym "result")` computed once and spliced everywhere via unquote instead of a literal template binding.
 - [x] **Flow-sensitive analysis**: `(check-types (lambda (params...) expr) '((param type)...))` (`src/type_check.rs`) — a static checker that walks the body *without executing it*, tracking each variable's known type through `if`/`let`/`let*`: narrows on a recognized `<type>?` predicate test in an `if` condition (in the then-branch), propagates through `let`/`let*` init expressions, and reports any operation it can *prove* runs on the wrong type. Deliberately conservative — an undeterminable type is `Unknown` and is never flagged, so it only reports provable mismatches, never guesses. Verified: flags `(string-length x)` when `x` is declared `number`; does *not* flag the same call inside a `(let ((y (+ x 1))) ...)` when it's actually `string-length` on `y` that's wrong (propagation); and — the key flow-sensitive proof — narrowing from `(if (number? x) (+ x 1) ...)` *overrides* an outer declared type of `string` for `x` within that branch, so no false positive there. v1 cuts (each an extension point): only `if`/`let`/`let*` understood, no union types, and user-defined function calls always return `Unknown` (no registry linking `define-typed`'s declared return types back into this checker yet).
 - [x] **Effect tracking**: `(check-effects (lambda (params...) body...))` (`src/effect_check.rs`) walks every body statement *without executing them* and reports each operation it can prove is effectful, from a fixed classification (`set!`/`set` mutate; `print`/`println`/`display`/`newline` do I/O; `shell`/`shell-run` run commands; file ops touch the filesystem; `llm`/`tool-call`/`react-loop` call external services; `remember`/`recall`/`forget`/`memory-list` touch persistent memory; `gensym` is non-deterministic; `load`/`load-relative` execute another file) or `'pure` if none are found. Same conservative philosophy as `check-types` — an unrecognized/user-defined call is never flagged, since purity can't be proven either way for it without whole-program analysis. `(effectful? 'name)` exposes the same classification as a simple query. Correctly distinguishes `quote`d data (inert, never flagged even if it looks like `(set! ...)`) from `quasiquote`'s `unquote`/`unquote-splicing` parts (which *are* evaluated and are checked) — verified for both.
@@ -61,32 +65,32 @@ In 5 years, Rusty will be:
 
 ### 2.3 Tool Registry with Specifications
 - [ ] **Tool specifications**: Formal signatures + invariants for all tools
-- [ ] **Contract enforcement**: Runtime checks + static verification
+- [ ] **Contract enforcement**: Runtime checks + static verification — reuse `define-typed`/`check-types`/`check-effects` (2.2) against `deftool` signatures rather than building a second, parallel contract system
 - [ ] **Tool dependency graphs**: Track dependencies and execution order constraints
-- **Deliverable:** Safety certification for agent tool chains (provably safe execution)
+- **Deliverable:** Safety certification for agent tool chains (provably safe execution) — "provable" via the self-contained checkers above, same as 2.1
 
 ---
 
-## Phase 3: Production ML Integration (Months 24–36)
+## Phase 3: Native ML Capability (Months 24–36)
 
-**Goal:** Make Rusty a first-class component in ML infrastructure.
+**Goal:** Make Rusty capable of real numeric/ML workloads on its own — benchmarked *against* PyTorch/JAX, never dependent *on* them.
 
-### 3.1 PyTorch / JAX Integration
-- [ ] **Tensor interop**: Zero-copy exchange of ndarrays between Rusty and PyTorch/JAX
-- [ ] **Autodiff bridge**: Call rusty-generated gradients from PyTorch
-- [ ] **Model serialization**: Save/load Rusty agent + neural models together
-- **Deliverable:** End-to-end example: PyTorch model + Rusty symbolic reasoning pipeline
+### 3.1 Native Tensor & Autodiff
+- [ ] **Native tensor type**: a Rusty-owned tensor value (flat buffer + shape/strides) and Graph IR ops over it, extending `graph_ir.rs`'s scalar `Op`s to vectors/matrices — no PyTorch/JAX/candle/burn dependency. (Even Rust-native ML crates are still an external dependency to avoid here — the point is Rusty carries its own weight.)
+- [ ] **C ABI export, not a bridge**: `defrust`/`grad`-generated functions already compile to a plain `extern "C"` function (`rust_jit.rs`) — anything, including PyTorch via `ctypes` or a custom op, can already call *into* Rusty-compiled code. Rusty doesn't need to depend on PyTorch for that to work in the other direction, so there's no "bridge" to build here, just documentation of what already works.
+- [ ] **Model serialization**: save/load Rusty agent + tensor/Graph-IR state together in Rusty's own format, using `serde` (already a dependency) — no external format required.
+- **Deliverable:** A Rusty-native tensor workload (e.g. a small neural layer's forward+backward pass) benchmarked against PyTorch on the same hardware — Rusty doesn't call PyTorch to produce the result, it's compared to it after the fact.
 
 ### 3.2 Distributed Agent Orchestration
 - [ ] **Message passing**: Spawn multiple agent instances, coordinate via Lisp message queue
-- [ ] **Checkpoint / restore**: Serialize agent state (environments, tool results) for fault tolerance
-- [ ] **Tracing & observability**: OpenTelemetry integration for agent execution traces
+- [ ] **Checkpoint / restore**: Serialize agent state (environments, tool results) for fault tolerance, via `serde` — no external store required
+- [ ] **Tracing & observability**: Rusty's own lightweight execution-trace format, extending the macro profiler's approach (`eval::macro_profile`) to general agent/tool execution — optionally exportable to OpenTelemetry or similar by whoever consumes it, but Rusty itself doesn't depend on an OTel collector to produce a trace
 - **Deliverable:** Multi-agent system where agents coordinate symbolic reasoning
 
 ### 3.3 Performance & Optimization
-- [ ] **JIT compilation**: Compile hot Rusty code paths to native machine code
-- [ ] **Kernel fusion**: Combine adjacent operations into single efficient kernels
-- [ ] **Memory pooling**: Reduce allocations for high-frequency agent loops
+- [ ] **JIT compilation**: this is `defrust` (`rust_jit.rs`, Phase 1.2) — this item is now "extend it" (support more of the language, not "build it")
+- [ ] **Kernel fusion**: wire Graph IR (`graph_ir.rs`, Phase 1.2) into `defrust`'s codegen so an optimized graph compiles to one fused native function instead of interpreting the DAG node-by-node — the integration explicitly deferred when Graph IR shipped
+- [ ] **Memory pooling**: `src/arena.rs` already exists as a dormant mark/sweep allocator (not wired into the evaluator) — this item is "activate and integrate it," not build a new one
 - **Deliverable:** 10x speedup on agent benchmarks vs. naive interpretation
 
 ---
@@ -106,9 +110,9 @@ In 5 years, Rusty will be:
 - **Deliverable:** Example: synthesize sorting algorithms from spec
 
 ### 4.3 Theorem Proving Assistant
-- [ ] **Interactive proof search**: Implement tactics for Lean / Coq in Rusty
+- [ ] **Interactive proof search**: tactics implemented natively over Rusty's own proof-obligation representation (extending the bounded-checking / proof-by-checker-loop work from 2.1) — not a Lean/Coq plugin
 - [ ] **Proof strategy macros**: High-level proof patterns as Lisp macros
-- **Deliverable:** Rusty-powered proof assistant for formal mathematics
+- **Deliverable:** Rusty-powered proof assistant for the invariants Rusty itself can express (not general mathematics — that scope genuinely needs a Lean/Coq-scale system, which is exactly what this roadmap's design constraint rules out)
 
 ### 4.4 Robotics / Autonomous Systems
 - [ ] **Deterministic task execution**: Timing-aware execution guarantees for control loops
@@ -146,8 +150,8 @@ In 5 years, Rusty will be:
 | Phase | Timeline | Key Deliverable | Success Metric |
 |-------|----------|-----------------|----------------|
 | 1 | Q1–Q4 2025 | Symbolic DSL + code generation | Rusty-generated code ≥ PyTorch performance |
-| 2 | Q1–Q2 2026 | Formal verification integration | Tool specifications verified via Lean |
-| 3 | Q3–Q4 2026 | ML infrastructure integration | End-to-end PyTorch + Rusty pipeline |
+| 2 | Q1–Q2 2026 | Self-contained verification | Tool specifications verified via Rusty's own checkers (no external prover) |
+| 3 | Q3–Q4 2026 | Native ML capability | Rusty-native tensor workload benchmarked against PyTorch |
 | 4 | Q1–Q4 2027 | Killer app libraries | Symbolic regression outperforms SOTA |
 | 5 | Q1 2028+ | Maturity | v1.0.0 release, 10+ production users |
 
@@ -155,22 +159,24 @@ In 5 years, Rusty will be:
 
 ## Near-Term Action Items (Next 3 Months)
 
+This section is now stale relative to actual progress — most of it shipped in Phase 1/2.2 already, and one line below ("integrate with a simple ML framework") is exactly the external-dependency framing the Design Constraint above rules out. Left visible rather than deleted so it's clear what changed and why.
+
 ### Immediate (This Sprint)
 - [ ] Complete ARCHITECTURE.md documenting evaluator and macro system
 - [ ] Write 3 macro examples showing code generation potential
-- [ ] Benchmark current macro performance
+- [x] Benchmark current macro performance — `(macro-profile-on)`/`(macro-profile-report)`/`(show-macro-profile)`, Phase 1.1
 - [ ] Set up CI/CD with performance regression detection
 
 ### Next Sprint (Month 2)
-- [ ] Implement compile-time evaluation (`eval-when`)
-- [ ] Build first symbolic differentiation macro
-- [ ] Create computation graph IR prototype
-- [ ] Publish benchmark comparison vs. PyTorch
+- [x] Implement compile-time evaluation (`eval-when`) — Phase 1.1
+- [x] Build first symbolic differentiation macro — `grad`, Phase 1.2
+- [x] Create computation graph IR prototype — `src/graph_ir.rs`, Phase 1.2 (further along than "prototype": has CSE/constant-folding/DCE, not just a data structure)
+- [ ] Publish benchmark comparison vs. PyTorch — the `defrust` fib benchmark exists (Phase 1.2's deliverable note) but isn't published anywhere; a real PyTorch-comparable benchmark still needs Graph IR wired into `defrust` (Phase 3.3)
 
 ### Sprint 3 (Month 3)
-- [ ] Finalize graph optimization passes
-- [ ] Begin neuro-symbolic bridge library design
-- [ ] Integrate with simple ML framework
+- [x] Finalize graph optimization passes — Phase 1.2
+- [x] Begin neuro-symbolic bridge library design — Phase 1.3 (`defun-constrained`/`logic-loss`)
+- [ ] ~~Integrate with simple ML framework~~ — superseded by Phase 3.1's native tensor type; no ML framework dependency, per the Design Constraint above
 - [ ] Write user-facing tutorial
 
 ---
@@ -186,7 +192,7 @@ In 5 years, Rusty will be:
 - Need: +1 community contributor (testing, documentation)
 
 ### Phase 2 (Target: v0.25–0.30)
-- Need: +1 formal methods specialist (Lean interop, verification)
+- Need: +1 formal-methods-literate contributor (self-built verification/checker design — no Lean interop needed, per the design constraint above)
 
 ### Phase 3+ (Target: v0.5–1.0)
 - Need: Small team (3–5) for ML integration and performance
@@ -202,6 +208,6 @@ In 5 years, Rusty will be:
 
 ---
 
-**Last updated:** July 2026 | **Status:** On track — Phase 1 in progress
+**Last updated:** July 2026 | **Status:** Phase 1 complete; Phase 2.2 complete; Phase 2.1/2.3, Phase 3 open
 
 🦀 *In memory of the brother who inspired this journey.*
