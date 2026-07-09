@@ -210,6 +210,6 @@ This section is now stale relative to actual progress — most of it shipped in 
 
 ---
 
-**Last updated:** July 2026 | **Status:** Phases 1–3 complete; 4.1 (Symbolic Regression) complete incl. the gplearn head-to-head deliverable (25/30 vs 12/30); 4.2 (Formal Program Synthesis) next
+**Last updated:** July 2026 | **Status:** Every item buildable by engineering alone is done — Phases 1–4 complete with all deliverables measured and met; 5.1 and 5.2 complete (SPEC, tutorial, package manager, rusty-lsp, testkit, CI perf gates). Open items are, by nature, not code: 1.3's knowledge-graph bindings (external-dependency choice — owner's call) and 5.3's community goals (flagship adopters, academic partnerships, production deployments — these need users, not commits). v0.28.0, 11-check suite green, CI green incl. the perf gate.
 
 ☯ *In memory of my brother.*
