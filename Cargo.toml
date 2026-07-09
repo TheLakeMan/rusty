@@ -1,12 +1,16 @@
 [package]
 name = "rusty"
-version = "0.26.0"
+version = "0.27.0"
 edition = "2021"
 description = "A modern Lisp interpreter in Rust with TCO, macros, and AI agent capabilities"
 
 [[bin]]
 name = "rusty"
 path = "src/main.rs"
+
+[[bin]]
+name = "rusty-lsp"
+path = "src/lsp_main.rs"
 
 [lib]
 name = "rusty"
