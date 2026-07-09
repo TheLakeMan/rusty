@@ -37,6 +37,7 @@ run_test "swarm.lisp"        "expected_swarm.txt"  "swarm.lisp (multi-agent synt
 run_test "symreg-test.lisp"  "expected_symreg.txt" "symreg-test.lisp (equation discovery)"
 run_test "synth-test.lisp"   "expected_synth.txt"  "synth-test.lisp (sketch synthesis)"
 run_test "prover-test.lisp"  "expected_prover.txt" "prover-test.lisp (proof assistant)"
+run_test "robot-test.lisp"   "expected_robot.txt"  "robot-test.lisp (safe control)"
 
 echo
 echo "Results: $PASS passed, $FAIL failed"

@@ -1,0 +1,8 @@
+(goal-reached (15 0) ticks 12 deadline-misses 0)
+(from-far-wall final (15 0) positions (20 18 16 15 15 15 15 15 15 15 15 15 15))
+(actuation verified)
+(inductive-step verified)
+(proved corridor-safety)
+(initial-safe #t)
+(reckless-rejected #t first-counterexample ((18 1) false))
+ROBOT TESTS DONE
