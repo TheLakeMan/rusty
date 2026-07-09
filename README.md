@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.16.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.17.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -377,6 +377,13 @@ total                 ; => 25
 Cooperative and single-threaded by design (Rusty's runtime is `Rc`-based):
 concurrency means deterministic interleaved message handling, not threads.
 An LLM-backed agent is just a handler that calls `llm`.
+
+**See it all together**: `cargo run -- swarm.lisp` — a proposer/verifier/
+certifier swarm that synthesizes verified functions through message passing
+alone. The verifier runs the static gates first (an impure candidate is
+rejected without ever executing), counterexamples loop back to the proposer
+as feedback messages, two synthesis tasks progress interleaved, and every
+hop is traced. Deterministic — it's one of the golden tests.
 
 ### Execution Tracing
 
