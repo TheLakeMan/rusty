@@ -592,7 +592,7 @@ fn eval_nodes(graph: &Graph, inputs: &[GVal]) -> Result<Vec<GVal>, String> {
 
 // ── Inspect: Graph → Lisp data ────────────────────────────────────────────
 
-fn op_name(op: &Op) -> &'static str {
+pub fn op_name(op: &Op) -> &'static str {
     match op {
         Op::Const(_) => "const", Op::Param(_) => "param",
         Op::Add => "add", Op::Sub => "sub", Op::Mul => "mul", Op::Div => "div",

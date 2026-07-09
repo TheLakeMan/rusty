@@ -317,19 +317,29 @@ pub fn compile_and_load_group(defs: &[FnDef]) -> Result<Vec<Value>, String> {
         .map(|d| generate_fn_source(d, &fns))
         .collect::<Result<Vec<_>, _>>()?
         .join("\n");
+    let wants: Vec<(String, String, usize)> = defs.iter()
+        .map(|d| (d.name.clone(), fns[&d.name].0.clone(), d.params.len()))
+        .collect();
+    build_and_load(&source, &wants)
+}
 
+/// Shared back half of every compilation path (`defrust`, `defrust*`,
+/// `graph-compile`): write source, `rustc` it (cached by source hash),
+/// load the `.so`, and resolve one `Value::Native` per requested symbol.
+/// `wants` is (Lisp name, Rust symbol, arity) per function.
+fn build_and_load(source: &str, wants: &[(String, String, usize)]) -> Result<Vec<Value>, String> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
     let hash = hasher.finish();
 
     let so_ext = if cfg!(target_os = "macos") { "dylib" } else if cfg!(target_os = "windows") { "dll" } else { "so" };
     let dir = cache_dir();
-    let base = sanitize_ident(&defs[0].name);
+    let base = &wants[0].1;
     let so_path  = dir.join(format!("{}_{:x}.{}", base, hash, so_ext));
     let src_path = dir.join(format!("{}_{:x}.rs", base, hash));
 
     if !so_path.exists() {
-        std::fs::write(&src_path, &source)
+        std::fs::write(&src_path, source)
             .map_err(|e| format!("defrust: cannot write {}: {}", src_path.display(), e))?;
         let output = std::process::Command::new("rustc")
             .args(["--edition", "2021", "-O", "--crate-type", "cdylib", "-o"])
@@ -344,16 +354,66 @@ pub fn compile_and_load_group(defs: &[FnDef]) -> Result<Vec<Value>, String> {
 
     let lib = Rc::new(unsafe { libloading::Library::new(&so_path) }
         .map_err(|e| format!("defrust: failed to load {}: {}", so_path.display(), e))?);
-    defs.iter().map(|d| {
-        let rust_name = &fns[&d.name].0;
+    wants.iter().map(|(lisp_name, rust_name, arity)| {
         let fn_ptr: *const () = unsafe {
             let sym: libloading::Symbol<unsafe extern "C" fn(*const f64, usize) -> f64> = lib
                 .get(rust_name.as_bytes())
                 .map_err(|e| format!("defrust: symbol '{}' not found in compiled library: {}", rust_name, e))?;
             *sym as *const ()
         };
-        Ok(Value::Native { name: d.name.clone(), arity: d.params.len(), lib: lib.clone(), fn_ptr })
+        Ok(Value::Native { name: lisp_name.clone(), arity: *arity, lib: lib.clone(), fn_ptr })
     }).collect()
+}
+
+// ── Kernel fusion: optimized Graph IR → one fused native function ───────
+
+/// Compile an already-optimized scalar graph (Phase 3.3 "kernel fusion"):
+/// the whole DAG becomes ONE straight-line Rust function — every node a
+/// `let`, in topological order (`Node::args` are always < the node's own
+/// index), CSE/folding/DCE already done by `optimize()`. Matches
+/// `eval_graph`'s semantics exactly, including its eager `If` (a select
+/// between two already-computed values, not a branch).
+pub fn compile_graph(name: &str, graph: &crate::graph_ir::Graph, nparams: usize) -> Result<Value, String> {
+    use crate::graph_ir::Op;
+    let rust_name = sanitize_ident(name);
+    let mut body = String::new();
+    for (i, node) in graph.nodes.iter().enumerate() {
+        let a = node.args.first().copied().unwrap_or(0);
+        let b = node.args.get(1).copied().unwrap_or(0);
+        let expr = match &node.op {
+            Op::Const(bits) => format!("f64::from_bits({}u64) /* {:?} */", bits, f64::from_bits(*bits)),
+            Op::Param(p)    => format!("p{}", p),
+            Op::Add => format!("v{} + v{}", a, b),
+            Op::Sub => format!("v{} - v{}", a, b),
+            Op::Mul => format!("v{} * v{}", a, b),
+            Op::Div => format!("v{} / v{}", a, b),
+            Op::Lt  => format!("if v{} <  v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::Gt  => format!("if v{} >  v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::Le  => format!("if v{} <= v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::Ge  => format!("if v{} >= v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::Eq  => format!("if v{} == v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::If  => format!("if v{} != 0.0 {{ v{} }} else {{ v{} }}", a, b, node.args[2]),
+            Op::Relu => format!("v{}.max(0.0)", a),
+            Op::Step => format!("if v{} > 0.0 {{ 1.0_f64 }} else {{ 0.0_f64 }}", a),
+            other => return Err(format!(
+                "graph-compile: '{}' is a tensor op — compiled graph kernels are scalar-only \
+                 (tensor fusion is shape-specialized, see graph-grad)", crate::graph_ir::op_name(other)
+            )),
+        };
+        body.push_str(&format!("    let v{} = {};\n", i, expr));
+    }
+    body.push_str(&format!("    v{}", graph.output));
+
+    let unpack: String = (0..nparams)
+        .map(|i| format!("    let p{} = unsafe {{ *args.add({}) }};\n", i, i))
+        .collect();
+    let source = format!(
+        "#[allow(unused_variables)]\n#[no_mangle]\n\
+         pub extern \"C\" fn {name}(args: *const f64, len: usize) -> f64 {{\n\
+         \x20   debug_assert_eq!(len, {arity});\n{unpack}{body}\n}}\n",
+        name = rust_name, arity = nparams, unpack = unpack, body = body,
+    );
+    Ok(build_and_load(&source, &[(name.to_string(), rust_name, nparams)])?.pop().unwrap())
 }
 
 pub fn compile_and_load(name: &str, params: &[String], body: &Expr) -> Result<Value, String> {

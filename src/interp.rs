@@ -866,6 +866,21 @@ pub fn setup_builtins(env: &Env) {
             crate::graph_ir::GVal::Tensor { data, shape } => Ok(Value::Tensor { data, shape }),
         }
     });
+    // (graph-compile (lambda (params...) expr)) → a callable Value::Native.
+    // Phase 3.3 kernel fusion, scalar half: the optimized DAG (CSE + folding
+    // + DCE already applied) is emitted as ONE straight-line Rust function
+    // and compiled through the same rustc/cache/libloading pipeline as
+    // defrust. Call it like any function: ((graph-compile f) 1 2).
+    b!("graph-compile", |args| {
+        match args.first() {
+            Some(Value::Lambda { params, body, .. }) => {
+                if body.len() != 1 { return Err("graph-compile: lambda body must be a single expression".into()); }
+                let graph = crate::graph_ir::optimize(&crate::graph_ir::build(params, &body[0])?);
+                crate::rust_jit::compile_graph("graph-kernel", &graph, params.len())
+            }
+            _ => Err("graph-compile: (graph-compile (lambda (params...) expr)) — argument must be a lambda".into()),
+        }
+    });
     // (graph-grad (lambda (params...) scalar-loss-expr) args...) →
     //   (loss grad-per-param...)
     // Reverse-mode autodiff: one backward sweep over the Graph IR yields the
