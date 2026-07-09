@@ -83,6 +83,21 @@ impl Lexer {
                         while matches!(self.peek(), Some(d) if d.is_ascii_digit() || d == '.') {
                             self.advance();
                         }
+                        // Scientific notation: 1e-20, 2.5E+3, 7e9 — an
+                        // e/E directly followed by [+-]?digits is part of
+                        // the number, not the start of a symbol.
+                        if matches!(self.peek(), Some('e') | Some('E')) {
+                            let mark = self.pos;
+                            self.advance(); // e/E
+                            if matches!(self.peek(), Some('+') | Some('-')) { self.advance(); }
+                            if matches!(self.peek(), Some(d) if d.is_ascii_digit()) {
+                                while matches!(self.peek(), Some(d) if d.is_ascii_digit()) {
+                                    self.advance();
+                                }
+                            } else {
+                                self.pos = mark; // not an exponent (e.g. `2elephants`)
+                            }
+                        }
                         let s: String = self.input[start..self.pos].iter().collect();
                         tokens.push(s.parse::<f64>().map(Token::Number)
                             .unwrap_or_else(|_| Token::Symbol(s)));

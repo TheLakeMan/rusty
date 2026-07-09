@@ -1,0 +1,10 @@
+(quadratic found (+ (+ x (+ (* x x) x)) 1) mse 0 gen 5)
+(koza-1 found (+ (* x (+ (* (+ x (* x x)) x) x)) x) mse 0.000000000000000000000000000000043874518352135885 gen 13)
+(bivar found (+ (* y x) x) mse 0 gen 5)
+(koza-1-with-blocks found (+ (+ (* x (+ (cube x) (sq x))) x) (sq x)) mse 0.000000000000000000000000000000010014835710813626 gen 6)
+(blocks-helped #t gens 6 vs 13)
+(quadratic held-out-exact #t)
+(koza-1 held-out-exact #t)
+(bivar held-out-exact #t)
+(koza-1-with-blocks held-out-exact #t)
+SYMREG TESTS DONE

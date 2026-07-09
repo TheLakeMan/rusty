@@ -459,6 +459,18 @@ impl Evaluator {
                                 return Ok(expr_to_value(&lst[1]));
                             }
 
+                            // ── eval: run a data value as code, in the
+                            // CURRENT env (unlike eval-string's deliberate
+                            // fresh env). Rebinding `cur` makes it a tail
+                            // call. Code values (lambdas etc.) inside the
+                            // datum don't convert — eval takes pure data.
+                            "eval" => {
+                                if lst.len() != 2 { return Err("eval: (eval datum)".into()); }
+                                let datum = self.eval(&lst[1], &env)?;
+                                cur = value_to_expr(&datum);
+                                continue;
+                            }
+
                             "quasiquote" => {
                                 if lst.len() != 2 { return Err("quasiquote: expects 1 arg".into()); }
                                 return self.expand_quasiquote(&lst[1], &env);
