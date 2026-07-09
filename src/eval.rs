@@ -38,12 +38,33 @@ pub struct Evaluator;
 impl Evaluator {
     pub fn new() -> Self { Evaluator }
 
+    // One tokio runtime for every LLM call — building a fresh runtime per
+    // call (the old behavior) spins up and tears down a thread pool each
+    // time. First use initializes it; it lives for the process.
+    fn llm_runtime() -> &'static tokio::runtime::Runtime {
+        static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+        RT.get_or_init(|| tokio::runtime::Runtime::new()
+            .expect("failed to initialize tokio runtime for LLM calls"))
+    }
+
     // ── LLM Builtin ───────────────────────────────────────────────────────
     async fn call_llm(prompt: &str, temperature: f32, max_tokens: Option<u32>) -> Result<String, String> {
-        let client = Client::new();
+        // Without a timeout a hung llama-server freezes the whole
+        // interpreter (the runtime block_on's this future). Default 120s,
+        // overridable via RUSTY_LLM_TIMEOUT_SECS.
+        let timeout_secs = std::env::var("RUSTY_LLM_TIMEOUT_SECS").ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(120);
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(timeout_secs))
+            .build()
+            .map_err(|e| format!("LLM client build failed: {}", e))?;
 
+        // llama-server ignores the model name for a single loaded model, so
+        // the fallback is a neutral placeholder — set RUSTY_MODEL to target
+        // a specific model on multi-model servers.
         let model = std::env::var("RUSTY_MODEL")
-            .unwrap_or_else(|_| "/home/thelakeman/workspace/models/Qwythos-9b/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf".to_string());
+            .unwrap_or_else(|_| "local-model".to_string());
         let url = std::env::var("RUSTY_LLM_URL")
             .unwrap_or_else(|_| "http://localhost:8080/v1/chat/completions".to_string());
         let system = std::env::var("RUSTY_SYSTEM")
@@ -64,7 +85,8 @@ impl Evaluator {
             .json(&request)
             .send()
             .await
-            .map_err(|e| format!("LLM connection failed (is llama-server running?): {}", e))?
+            .map_err(|e| format!(
+                "LLM request failed (is llama-server running? timeout is {}s): {}", timeout_secs, e))?
             .json::<ChatResponse>()
             .await
             .map_err(|e| format!("LLM response parse error: {}", e))?;
@@ -135,8 +157,7 @@ impl Evaluator {
                                     }
                                 } else { None };
 
-                                let result = tokio::runtime::Runtime::new()
-                                    .unwrap()
+                                let result = Self::llm_runtime()
                                     .block_on(Self::call_llm(&prompt, temp, max_t));
 
                                 return result.map(Value::String);
@@ -273,8 +294,7 @@ impl Evaluator {
                                     let prompt = format!("{}\nStep {}:", history, step + 1);
                                     let full_prompt = format!("{}\n\n{}", system, prompt);
 
-                                    let response = tokio::runtime::Runtime::new()
-                                        .unwrap()
+                                    let response = Self::llm_runtime()
                                         .block_on(Self::call_llm(&full_prompt, 0.3, Some(200)));
 
                                     let response = match response {
