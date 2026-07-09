@@ -173,7 +173,7 @@ fn codegen_let(sequential: bool, bindings: &Expr, body: &Expr, ctx: &mut Ctx) ->
         return Err("defrust: let bindings must be a list of (name init) pairs".into());
     };
     let mut pairs = Vec::with_capacity(bs.len());
-    for b in bs {
+    for b in bs.iter() {
         match b {
             Expr::List(p) if p.len() == 2 => {
                 if let Expr::Symbol(n) = &p[0] { pairs.push((n.clone(), &p[1])); }

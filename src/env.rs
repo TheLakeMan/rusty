@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+/// Frame variable map. FxHash instead of the std default: SipHash's
+/// DoS-resistance buys nothing for interpreter-internal short var names
+/// and costs real time on every lookup/insert (Phase 3.3).
+pub type VarMap = rustc_hash::FxHashMap<String, Value>;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -137,13 +140,26 @@ pub type Env = Rc<RefCell<EnvFrame>>;
 
 #[derive(Debug)]
 pub struct EnvFrame {
-    pub vars:   HashMap<String, Value>,
+    pub vars:   VarMap,
     pub parent: Option<Env>,
+}
+
+// Frame maps are pooled (Phase 3.3 memory pooling — see src/arena.rs):
+// construction takes a recycled map, Drop hands the cleared map back.
+impl Drop for EnvFrame {
+    fn drop(&mut self) {
+        if self.vars.capacity() == 0 { return; } // never allocated — nothing to recycle
+        let mut m = std::mem::take(&mut self.vars);
+        // Clear BEFORE touching the pool: dropping the contained values can
+        // recursively drop other EnvFrames, which also borrow the pool.
+        m.clear();
+        crate::arena::recycle_map(m);
+    }
 }
 
 impl EnvFrame {
     pub fn new(parent: Option<Env>) -> Env {
-        Rc::new(RefCell::new(EnvFrame { vars: HashMap::new(), parent }))
+        Rc::new(RefCell::new(EnvFrame { vars: crate::arena::take_map(), parent }))
     }
 
     pub fn get(env: &Env, name: &str) -> Option<Value> {

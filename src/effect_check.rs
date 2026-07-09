@@ -44,7 +44,7 @@ pub fn check(expr: &Expr, findings: &mut Vec<String>) {
                 }
             }
         }
-        for item in items { check(item, findings); }
+        for item in items.iter() { check(item, findings); }
     }
 }
 
@@ -56,6 +56,6 @@ fn check_quasi(expr: &Expr, findings: &mut Vec<String>) {
                 return;
             }
         }
-        for item in items { check_quasi(item, findings); }
+        for item in items.iter() { check_quasi(item, findings); }
     }
 }

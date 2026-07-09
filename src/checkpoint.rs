@@ -24,15 +24,15 @@
 use crate::env::{Env, Value};
 use crate::parser::Expr;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use crate::env::VarMap;
 
 // ── Baseline: what a pristine environment binds ─────────────────────────
 
 thread_local! {
-    static BASELINE: RefCell<Option<HashMap<String, Value>>> = RefCell::new(None);
+    static BASELINE: RefCell<Option<VarMap>> = RefCell::new(None);
 }
 
-fn with_baseline<R>(f: impl FnOnce(&HashMap<String, Value>) -> R) -> R {
+fn with_baseline<R>(f: impl FnOnce(&VarMap) -> R) -> R {
     BASELINE.with(|b| {
         if b.borrow().is_none() {
             let env = crate::interp::make_env();

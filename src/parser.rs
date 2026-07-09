@@ -6,8 +6,15 @@ pub enum Expr {
     Bool(bool),
     String(String),
     Symbol(String),
-    List(Vec<Expr>),
+    List(std::rc::Rc<Vec<Expr>>),
     Nil,
+}
+
+/// Build a list expression. `Expr::List` is `Rc`-backed (Phase 3.3 —
+/// cloning an Expr used to deep-copy whole function bodies on every call),
+/// so construction goes through here.
+pub fn elist(items: Vec<Expr>) -> Expr {
+    Expr::List(std::rc::Rc::new(items))
 }
 
 pub struct Parser {
@@ -41,22 +48,22 @@ impl Parser {
             Token::Quote => {
                 self.advance();
                 let inner = self.parse_expr()?;
-                Some(Expr::List(vec![Expr::Symbol("quote".into()), inner]))
+                Some(elist(vec![Expr::Symbol("quote".into()), inner]))
             }
             Token::Quasiquote => {
                 self.advance();
                 let inner = self.parse_expr()?;
-                Some(Expr::List(vec![Expr::Symbol("quasiquote".into()), inner]))
+                Some(elist(vec![Expr::Symbol("quasiquote".into()), inner]))
             }
             Token::Unquote => {
                 self.advance();
                 let inner = self.parse_expr()?;
-                Some(Expr::List(vec![Expr::Symbol("unquote".into()), inner]))
+                Some(elist(vec![Expr::Symbol("unquote".into()), inner]))
             }
             Token::UnquoteSplice => {
                 self.advance();
                 let inner = self.parse_expr()?;
-                Some(Expr::List(vec![Expr::Symbol("unquote-splicing".into()), inner]))
+                Some(elist(vec![Expr::Symbol("unquote-splicing".into()), inner]))
             }
             Token::LParen => {
                 self.advance();
@@ -67,7 +74,7 @@ impl Parser {
                         _ => { if let Some(e) = self.parse_expr() { list.push(e); } }
                     }
                 }
-                Some(Expr::List(list))
+                Some(elist(list))
             }
             Token::Number(n) => { let n = n; self.advance(); Some(Expr::Number(n)) }
             Token::Bool(b)   => { let b = b; self.advance(); Some(Expr::Bool(b)) }

@@ -791,7 +791,7 @@ impl Evaluator {
                 }
                 // Build list, splicing ,@ items
                 let mut result = Vec::new();
-                for item in qlst {
+                for item in qlst.iter() {
                     if let Expr::List(inner) = item {
                         if let Some(Expr::Symbol(s)) = inner.first() {
                             if s == "unquote-splicing" && inner.len() == 2 {
@@ -884,7 +884,7 @@ impl Evaluator {
         };
         let mut params = Vec::new();
         let mut inits  = Vec::new();
-        for b in bindings_raw {
+        for b in bindings_raw.iter() {
             if let Expr::List(pair) = b {
                 if pair.len() == 2 {
                     if let Expr::Symbol(n) = &pair[0] {
@@ -924,7 +924,7 @@ impl Evaluator {
         let mut inits: Vec<Expr>         = Vec::new();
         let mut steps: Vec<Option<Expr>> = Vec::new();
 
-        for spec in var_specs {
+        for spec in var_specs.iter() {
             if let Expr::List(s) = spec {
                 match s.len() {
                     2 => { names.push(sym_name(&s[0], "do")?); inits.push(s[1].clone()); steps.push(None); }
@@ -984,7 +984,7 @@ pub fn value_to_expr(v: &Value) -> Expr {
         Value::Bool(b)   => Expr::Bool(*b),
         Value::String(s) => Expr::String(s.clone()),
         Value::Symbol(s) => Expr::Symbol(s.clone()),
-        Value::List(vs)  => Expr::List(vs.iter().map(value_to_expr).collect()),
+        Value::List(vs)  => crate::parser::elist(vs.iter().map(value_to_expr).collect()),
         _                => Expr::Nil,
     }
 }
@@ -1020,7 +1020,7 @@ fn extract_let_parts(list: &[Expr]) -> Result<(Vec<(String, Expr)>, Vec<Expr>), 
     if list.len() < 3 { return Err("let: (let ((x v)...) body...)".into()); }
     let bs = match &list[1] { Expr::List(b) => b, _ => return Err("let: bindings must be a list".into()) };
     let mut bindings = Vec::new();
-    for b in bs {
+    for b in bs.iter() {
         if let Expr::List(pair) = b {
             if pair.len() == 2 {
                 if let Expr::Symbol(n) = &pair[0] { bindings.push((n.clone(), pair[1].clone())); continue; }
@@ -1033,7 +1033,7 @@ fn extract_let_parts(list: &[Expr]) -> Result<(Vec<(String, Expr)>, Vec<Expr>), 
 
 pub fn wrap_begin(mut exprs: Vec<Expr>) -> Expr {
     if exprs.len() == 1 { exprs.remove(0) }
-    else { let mut v = vec![Expr::Symbol("begin".into())]; v.extend(exprs); Expr::List(v) }
+    else { let mut v = vec![Expr::Symbol("begin".into())]; v.extend(exprs); crate::parser::elist(v) }
 }
 
 // ── Symbolic differentiation ──────────────────────────────────────────────
@@ -1061,7 +1061,7 @@ pub fn symbolic_derivative(expr: &Expr, var: &str) -> Result<Expr, String> {
                 }
                 "-" if !args.is_empty() => {
                     let ds = args.iter().map(|a| symbolic_derivative(a, var)).collect::<Result<Vec<_>, _>>()?;
-                    Ok(Expr::List(std::iter::once(Expr::Symbol("-".into())).chain(ds).collect()))
+                    Ok(crate::parser::elist(std::iter::once(Expr::Symbol("-".into())).chain(ds).collect()))
                 }
                 "*" if args.len() >= 2 => {
                     // Sum, over each term, of (product of all terms with that one replaced by its derivative).
@@ -1071,21 +1071,21 @@ pub fn symbolic_derivative(expr: &Expr, var: &str) -> Result<Expr, String> {
                         for (j, a) in args.iter().enumerate() {
                             factors.push(if i == j { symbolic_derivative(a, var)? } else { a.clone() });
                         }
-                        terms.push(Expr::List(std::iter::once(Expr::Symbol("*".into())).chain(factors).collect()));
+                        terms.push(crate::parser::elist(std::iter::once(Expr::Symbol("*".into())).chain(factors).collect()));
                     }
                     Ok(sum_expr(terms))
                 }
                 "/" if args.len() == 1 => {
                     // d/dx[1/a] = -a' / a^2
                     let da = symbolic_derivative(&args[0], var)?;
-                    Ok(list2("/", Expr::List(vec![Expr::Symbol("-".into()), da]),
+                    Ok(list2("/", crate::parser::elist(vec![Expr::Symbol("-".into()), da]),
                         list2("*", args[0].clone(), args[0].clone())))
                 }
                 "/" if args.len() == 2 => {
                     // Quotient rule: (a'b - ab') / b^2
                     let da = symbolic_derivative(&args[0], var)?;
                     let db = symbolic_derivative(&args[1], var)?;
-                    let numer = Expr::List(vec![Expr::Symbol("-".into()),
+                    let numer = crate::parser::elist(vec![Expr::Symbol("-".into()),
                         list2("*", da, args[1].clone()), list2("*", args[0].clone(), db)]);
                     Ok(list2("/", numer, list2("*", args[1].clone(), args[1].clone())))
                 }
@@ -1097,18 +1097,18 @@ pub fn symbolic_derivative(expr: &Expr, var: &str) -> Result<Expr, String> {
                     let da = symbolic_derivative(&args[0], var)?;
                     // n * a^(n-1) * a'
                     let pow = list2("expt", args[0].clone(), Expr::Number(n - 1.0));
-                    Ok(Expr::List(vec![Expr::Symbol("*".into()), Expr::Number(n), list2("*", pow, da)]))
+                    Ok(crate::parser::elist(vec![Expr::Symbol("*".into()), Expr::Number(n), list2("*", pow, da)]))
                 }
                 "sqrt" if args.len() == 1 => {
                     // a' / (2 * sqrt(a))
                     let da = symbolic_derivative(&args[0], var)?;
-                    let denom = list2("*", Expr::Number(2.0), Expr::List(vec![Expr::Symbol("sqrt".into()), args[0].clone()]));
+                    let denom = list2("*", Expr::Number(2.0), crate::parser::elist(vec![Expr::Symbol("sqrt".into()), args[0].clone()]));
                     Ok(list2("/", da, denom))
                 }
                 "if" if args.len() == 3 => {
                     let dthen = symbolic_derivative(&args[1], var)?;
                     let delse = symbolic_derivative(&args[2], var)?;
-                    Ok(Expr::List(vec![Expr::Symbol("if".into()), args[0].clone(), dthen, delse]))
+                    Ok(crate::parser::elist(vec![Expr::Symbol("if".into()), args[0].clone(), dthen, delse]))
                 }
                 other => Err(format!("grad: unsupported operator '{}' in body", other)),
             }
@@ -1117,14 +1117,14 @@ pub fn symbolic_derivative(expr: &Expr, var: &str) -> Result<Expr, String> {
     }
 }
 
-fn list2(op: &str, a: Expr, b: Expr) -> Expr { Expr::List(vec![Expr::Symbol(op.into()), a, b]) }
+fn list2(op: &str, a: Expr, b: Expr) -> Expr { crate::parser::elist(vec![Expr::Symbol(op.into()), a, b]) }
 
 fn sum_expr(mut terms: Vec<Expr>) -> Expr {
     terms.retain(|t| !matches!(t, Expr::Number(n) if *n == 0.0));
     match terms.len() {
         0 => Expr::Number(0.0),
         1 => terms.into_iter().next().unwrap(),
-        _ => Expr::List(std::iter::once(Expr::Symbol("+".into())).chain(terms).collect()),
+        _ => crate::parser::elist(std::iter::once(Expr::Symbol("+".into())).chain(terms).collect()),
     }
 }
 
@@ -1194,10 +1194,10 @@ pub fn hygienic_rename_top(expr: &Expr) -> Expr {
             if let Expr::Symbol(s) = &items[0] {
                 if s == "quasiquote" && items.len() == 2 {
                     let map = HashMap::new();
-                    return Expr::List(vec![items[0].clone(), hygienic_rename(&items[1], &map)]);
+                    return crate::parser::elist(vec![items[0].clone(), hygienic_rename(&items[1], &map)]);
                 }
             }
-            Expr::List(items.iter().map(hygienic_rename_top).collect())
+            crate::parser::elist(items.iter().map(hygienic_rename_top).collect())
         }
         other => other.clone(),
     }
@@ -1229,7 +1229,7 @@ fn rename_binding_list(
                     if pair.len() == 3 {
                         new_pair.push(hygienic_rename(&pair[2], child));
                     }
-                    out.push(Expr::List(new_pair));
+                    out.push(crate::parser::elist(new_pair));
                     continue;
                 }
             }
@@ -1255,10 +1255,10 @@ fn hygienic_rename(expr: &Expr, map: &HashMap<String, String>) -> Expr {
                             let mut new_items = vec![
                                 items[0].clone(),
                                 Expr::Symbol(new_loop_name),
-                                Expr::List(new_bindings),
+                                crate::parser::elist(new_bindings),
                             ];
                             for rest in &items[3..] { new_items.push(hygienic_rename(rest, &child)); }
-                            return Expr::List(new_items);
+                            return crate::parser::elist(new_items);
                         }
                     }
 
@@ -1267,9 +1267,9 @@ fn hygienic_rename(expr: &Expr, map: &HashMap<String, String>) -> Expr {
                             let sequential = head != "let";
                             let mut child = map.clone();
                             let new_bindings = rename_binding_list(bindings, map, &mut child, sequential);
-                            let mut new_items = vec![items[0].clone(), Expr::List(new_bindings)];
+                            let mut new_items = vec![items[0].clone(), crate::parser::elist(new_bindings)];
                             for rest in &items[2..] { new_items.push(hygienic_rename(rest, &child)); }
-                            return Expr::List(new_items);
+                            return crate::parser::elist(new_items);
                         }
                     }
 
@@ -1278,21 +1278,21 @@ fn hygienic_rename(expr: &Expr, map: &HashMap<String, String>) -> Expr {
                         let new_params = match &items[1] {
                             Expr::List(ps) => {
                                 let mut np = Vec::new();
-                                for p in ps {
+                                for p in ps.iter() {
                                     match p {
                                         Expr::Symbol(s) if s == "." => np.push(p.clone()),
                                         Expr::Symbol(s) => np.push(Expr::Symbol(fresh(s, &mut child))),
                                         other => np.push(hygienic_rename(other, map)),
                                     }
                                 }
-                                Expr::List(np)
+                                crate::parser::elist(np)
                             }
                             Expr::Symbol(s) => Expr::Symbol(fresh(s, &mut child)),
                             other => other.clone(),
                         };
                         let mut new_items = vec![items[0].clone(), new_params];
                         for rest in &items[2..] { new_items.push(hygienic_rename(rest, &child)); }
-                        return Expr::List(new_items);
+                        return crate::parser::elist(new_items);
                     }
 
                     // (do ((var init step)...) (test result...) body...)
@@ -1300,16 +1300,16 @@ fn hygienic_rename(expr: &Expr, map: &HashMap<String, String>) -> Expr {
                         if let Expr::List(specs) = &items[1] {
                             let mut child = map.clone();
                             let new_specs = rename_binding_list(specs, map, &mut child, true);
-                            let mut new_items = vec![items[0].clone(), Expr::List(new_specs)];
+                            let mut new_items = vec![items[0].clone(), crate::parser::elist(new_specs)];
                             for rest in &items[2..] { new_items.push(hygienic_rename(rest, &child)); }
-                            return Expr::List(new_items);
+                            return crate::parser::elist(new_items);
                         }
                     }
 
                     _ => {}
                 }
             }
-            Expr::List(items.iter().map(|e| hygienic_rename(e, map)).collect())
+            crate::parser::elist(items.iter().map(|e| hygienic_rename(e, map)).collect())
         }
         Expr::Symbol(s) => match map.get(s) {
             Some(renamed) => Expr::Symbol(renamed.clone()),

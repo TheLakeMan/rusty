@@ -1,84 +1,51 @@
-//! arena.rs — Arena Allocator for Rusty (future optimization)
+//! arena.rs — memory pooling for the evaluator (Phase 3.3, activated).
 //!
-//! The Arena pre-allocates slots to reduce heap fragmentation.
-//! Currently dormant — arena_list() in eval.rs wraps list() directly.
-//! To activate: integrate mark/sweep with eval's root set.
+//! This file used to hold a dormant mark/sweep arena sketch. That design
+//! was a mismatch for Rusty's memory model and was replaced, not activated:
+//! every `Value` is `Rc`-based, so reclamation already happens the moment a
+//! refcount hits zero — a tracing collector has nothing to collect — and
+//! the sketch's `mark()` had no value→slot mapping, so it could never know
+//! which slots were live (see git history for the original).
 //!
-//! NOTE: uses Rc which is single-threaded, so no global static.
-//! Instantiate per-interpreter when wiring in.
+//! What the evaluator actually pays for is *allocation churn*, and that is
+//! what this module pools: every function call and `let` builds an
+//! `EnvFrame` around a hash map whose table is allocated and dropped
+//! moments later. Dropped frames hand their cleared map (allocation and
+//! capacity intact) back here, and frame construction takes one out again —
+//! the table allocation is paid once and recycled, not once per call.
+//!
+//! Thread-local because `Value`/`Env` are `Rc`-based (single-threaded by
+//! design). `try_with` everywhere: during thread teardown the pool may
+//! already be destroyed while environments are still dropping.
+//!
+//! Shipped alongside two sibling churn fixes measured in the same pass
+//! (docs/ROADMAP.md 3.3): `Expr::List` became `Rc<Vec<Expr>>` (cloning a
+//! function body per call was a deep copy with a String allocation per
+//! symbol; now it's a refcount bump) and frame maps use FxHash instead of
+//! SipHash. Together: ~4× on call/let/actor-heavy workloads.
 
-use crate::env::Value;
+use crate::env::VarMap;
+use std::cell::RefCell;
 
-#[allow(dead_code)]
-pub struct Arena {
-    slots:    Vec<Slot>,
-    free:     Vec<usize>,
-    capacity: usize,
+thread_local! {
+    static FRAME_POOL: RefCell<Vec<VarMap>> = RefCell::new(Vec::new());
 }
 
-#[allow(dead_code)]
-struct Slot {
-    value:  Value,
-    marked: bool,
+/// Keep at most this many maps; beyond it, dropped maps just deallocate.
+const FRAME_POOL_CAP: usize = 1024;
+
+/// Take a recycled (empty, capacity-preserving) frame map, or a fresh one.
+pub fn take_map() -> VarMap {
+    FRAME_POOL.try_with(|p| p.borrow_mut().pop()).ok().flatten().unwrap_or_default()
 }
 
-#[allow(dead_code)]
-impl Arena {
-    pub fn new(cap: usize) -> Self {
-        let mut slots = Vec::with_capacity(cap);
-        let mut free  = Vec::with_capacity(cap);
-        for i in 0..cap {
-            slots.push(Slot { value: Value::Nil, marked: false });
-            free.push(i);
-        }
-        Arena { slots, free, capacity: cap }
-    }
-
-    pub fn alloc_list(&mut self, items: Vec<Value>) -> Value {
-        if self.free.is_empty() { self.grow(); }
-        let idx = self.free.pop().unwrap();
-        self.slots[idx].value  = crate::env::list(items);
-        self.slots[idx].marked = true;
-        self.slots[idx].value.clone()
-    }
-
-    fn grow(&mut self) {
-        let old = self.capacity;
-        let new = old * 2;
-        for i in old..new {
-            self.slots.push(Slot { value: Value::Nil, marked: false });
-            self.free.push(i);
-        }
-        self.capacity = new;
-    }
-
-    pub fn mark(&mut self, v: &Value) {
-        match v {
-            Value::List(rc) => {
-                for item in rc.iter() { self.mark(item); }
-            }
-            Value::Lambda { env, .. } | Value::Macro { env, .. } | Value::Tool { env, .. } => {
-                let frame = env.borrow();
-                for val in frame.vars.values() { self.mark(val); }
-            }
-            _ => {}
-        }
-    }
-
-    pub fn sweep(&mut self) {
-        self.free.clear();
-        for (i, slot) in self.slots.iter_mut().enumerate() {
-            if !slot.marked {
-                slot.value = Value::Nil;
-                self.free.push(i);
-            } else {
-                slot.marked = false;
-            }
-        }
-    }
-
-    pub fn gc(&mut self, roots: &[&Value]) {
-        for r in roots { self.mark(r); }
-        self.sweep();
-    }
+/// Return a frame's map to the pool. The caller must pass it *already
+/// cleared*: clearing drops the contained values, which can recursively
+/// drop other `EnvFrame`s that also borrow the pool.
+pub fn recycle_map(m: VarMap) {
+    debug_assert!(m.is_empty());
+    let _ = FRAME_POOL.try_with(|p| {
+        let mut pool = p.borrow_mut();
+        if pool.len() < FRAME_POOL_CAP { pool.push(m); }
+    });
 }

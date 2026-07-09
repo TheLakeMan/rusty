@@ -127,7 +127,7 @@ pub fn infer(expr: &Expr, env: &TyEnv, errors: &mut Vec<String>) -> Ty {
                         match &items[1] {
                             Expr::List(bindings) => {
                                 let mut child = env.clone();
-                                for b in bindings {
+                                for b in bindings.iter() {
                                     if let Expr::List(pair) = b {
                                         if pair.len() == 2 {
                                             if let Expr::Symbol(name) = &pair[0] {
