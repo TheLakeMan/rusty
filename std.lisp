@@ -586,5 +586,5 @@
 
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
-  (load "agent.lisp")
+  (load "agent-tools.lisp")
   (e) ())   ; silently skip if not found

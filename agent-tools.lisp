@@ -1,6 +1,6 @@
-;;; agent.lisp — Rusty Agent Tools + ReAct Loop
-;;; Loaded automatically by std.lisp at startup.
-;;; Tool registration is silent — call (agent-help) to see available tools.
+;;; agent-tools.lisp — the agent tool library (filesystem/shell/LLM tools
+;;; + the ReAct entry point). Loaded automatically by std.lisp at startup.
+;;; Registration is silent — call (agent-help) for the tool reference.
 
 ;; ── Filesystem tools ────────────────────────────────────────────────────────
 
@@ -67,21 +67,11 @@
     (list-tools)))
 
 (define (agent-help)
-  "Show registered tools and usage examples."
-  (show-tools)
-  (println "")
-  (println "Examples:")
-  (println "  (tool-call \"create-dir\" \"my-project\")")
-  (println "  (tool-call \"write-file\" \"my-project/README.md\" \"# My Project\")")
-  (println "  (tool-call \"read-file\" \"my-project/README.md\")")
-  (println "  (tool-call \"list-dir\" \"my-project\")")
-  (println "  (agent \"Create a folder called test-project with a README.md\")"))
+  "Show the registered tool reference."
+  (show-tools))
 
 (define (agent goal)
-  "Run a ReAct agent loop with all registered tools."
-  (println (format "🤖 Agent: ~a" goal))
-  (let ((result (react-loop goal 10)))
-    (println (format "✅ Result: ~a" result))
-    result))
+  "Run a ReAct agent loop (max 10 steps) with all registered tools."
+  (react-loop goal 10))
 
-;; Registration complete — no output. Call (agent-help) to see tools.
+;; Registration complete — no output. Call (agent-help) for the reference.

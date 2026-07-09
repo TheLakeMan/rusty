@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.22.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.22.1 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -29,9 +29,6 @@ cargo run
 
 # Run a Lisp file
 cargo run -- path/to/script.lisp
-
-# Run the agent demo
-cargo run -- agent.lisp
 
 # Python bridge
 maturin develop
@@ -61,7 +58,7 @@ Source (.lisp) or REPL input
 | `src/interp.rs` | 60+ builtins, stdlib loader, JSON, shell, format |
 | `src/env.rs` | Environment frames — `Value` enum including `Tool`, `Lambda`, `Macro` |
 | `src/lib.rs` | Python bindings via PyO3 — `Rusty`, `RustySession`, `rusty.eval()` |
-| `agent.lisp` | 10 filesystem + shell + LLM tools, ReAct agent loop |
+| `agent-tools.lisp` | 10 filesystem + shell + LLM tools, ReAct entry point (auto-loaded) |
 | `std.lisp` | Standard library — 230+ lines of Lisp utilities |
 
 [→ **Deep dive: Full architecture guide →**](./ARCHITECTURE.md)
@@ -119,8 +116,7 @@ Rusty (executor)  → deterministically does it
 ### react-loop — Autonomous Agent
 
 ```lisp
-; Load tools then run the ReAct loop
-(load "agent.lisp")
+; agent-tools.lisp is auto-loaded by std.lisp — tools are already registered
 (agent "Create a folder called notes with an index.md file")
 ```
 
@@ -151,7 +147,7 @@ llama-server -m /path/to/model.gguf --port 8080
 
 ---
 
-## Built-in Tools (agent.lisp)
+## Built-in Tools (agent-tools.lisp)
 
 | Tool | Args | Description |
 |------|------|-------------|
