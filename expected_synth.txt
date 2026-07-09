@@ -1,0 +1,12 @@
+(max ok (lambda (a b) (if (> a b) a b)) ((c (> a b))) tried 3 cexs 2)
+(abs ok (lambda (x) (if (< x 0) (- 0 x) x)) ((c (< x 0)) (e (- 0 x))) tried 8 cexs 1)
+(insertion-sort ok (letrec ((insert (lambda (x s) (cond ((null? s) (list x)) ((< x (car s)) (cons x s)) (else (cons (car s) (insert x (cdr s))))))) (isort (lambda (l) (if (null? l) (quote ()) (insert (car l) (isort (cdr l))))))) isort) ((base (list x)) (cmp (< x (car s)))) tried 9 cexs 3)
+(quicksort ok (letrec ((qs (lambda (l) (if (null? l) (quote ()) (let ((p (car l)) (r (cdr l))) (append (qs (filter (lambda (y) (<= y p)) r)) (cons p (qs (filter (lambda (y) (> y p)) r))))))))) qs) ((lo (<= y p)) (hi (> y p))) tried 4 cexs 2)
+(isort-run (-3 0 1 5 5 9))
+(qsort-run (-3 0 1 5 5 9))
+(agree #t)
+(proposer-loop ok bindings ((base (list x)) (cmp (< x (car s)))))
+(proposer-gives-up failed)
+(extract-from-prose ((base (list x)) (cmp (< x (car s)))))
+(extract-rejects-junk #t)
+SYNTH TESTS DONE

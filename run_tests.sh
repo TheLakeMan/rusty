@@ -35,6 +35,7 @@ run_test "new-features.lisp" "expected_new.txt"    "new-features.lisp"
 run_test "hello.lisp"        "expected_hello.txt"  "hello.lisp"
 run_test "swarm.lisp"        "expected_swarm.txt"  "swarm.lisp (multi-agent synthesis)"
 run_test "symreg-test.lisp"  "expected_symreg.txt" "symreg-test.lisp (equation discovery)"
+run_test "synth-test.lisp"   "expected_synth.txt"  "synth-test.lisp (sketch synthesis)"
 
 echo
 echo "Results: $PASS passed, $FAIL failed"
