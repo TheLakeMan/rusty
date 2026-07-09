@@ -1,6 +1,6 @@
 # The Rusty Language Specification
 
-**Version:** 0.25.0 · **Status:** normative for the 0.x series
+**Version:** 0.26.0 · **Status:** normative for the 0.x series
 **Conformance:** an implementation (or a change to this one) conforms iff
 `./run_tests.sh` passes — the eight golden files are the executable test
 suite for everything this document states.
@@ -80,7 +80,10 @@ Binding & control:
 `lambda` (dotted rest params), `set!`, `set`, `let`, `let*`, `letrec`,
 `letrec*`, named `let` (loops), `do`, `if`, `cond` (`else` arm),
 `when`, `unless`, `and`, `or` (short-circuit, return the deciding value),
-`begin`, `match`, `try-catch`, `load`, `load-relative`.
+`begin`, `match`, `try-catch`, `load`, `load-relative`. **`load`
+evaluates the file at top level** (the global environment) regardless of
+where the call sits — a `load` inside a function defines durable
+bindings, like Scheme.
 
 Data & code:
 `quote`, `quasiquote`/`unquote`/`unquote-splicing`,
@@ -122,7 +125,11 @@ anywhere else `eval-when` behaves like `begin`.
 All arithmetic is `f64`. `/` and `mod` raise on a zero divisor (compiled
 `defrust` code diverges here: no error channel, so `(mod x 0)` is NaN and
 `(/ x 0)` is ±inf). `min`/`max` are variadic. Builtins: `+ - * / mod expt
-abs sqrt floor ceiling round min max`. NaN compares false with everything
+abs sqrt floor ceiling round min max`. Filesystem builtins (`file-read`,
+`file-write`, `file-append`, `file-delete`, `file-exists?`, `dir-create`,
+`dir-list` — the last sorted for determinism) and `string-split` exist
+since 0.26.0 and are classified effectful by `check-effects`
+(`string-split` excepted — it's pure). NaN compares false with everything
 including itself — `(= x x)` is the NaN test.
 
 ## 9. Compiled subsets

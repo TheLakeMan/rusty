@@ -1,0 +1,13 @@
+(installed rusty-pkg-fix 1.2.0)
+(dep-arrived-too #t)
+(already-installed rusty-pkg-fix)
+(loaded rusty-pkg-dep 0.1.0)
+(loaded rusty-pkg-fix 1.2.0)
+(fix-answer-of-5 16)
+(loaded rusty-pkg-dep 0.1.0)
+(rejected pkg-load: no-such-package is not installed)
+(rejected pkg-install: file:///tmp/rusty-not-a-pkg is not a Rusty package (no package.lisp manifest))
+(removed rusty-pkg-fix)
+(removed rusty-pkg-dep)
+(not-installed rusty-pkg-fix)
+PKG TESTS DONE

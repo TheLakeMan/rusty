@@ -1107,6 +1107,74 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
+    // ── Filesystem (all classified effectful in effect_check.rs) ─────────
+    // These existed only as agent-tool NAMES until 0.26.0 — the tool
+    // bodies called builtins that were never implemented, and since tool
+    // bodies don't run at registration, nothing noticed.
+    fn one_path<'a>(args: &'a [Value], who: &str) -> Result<&'a str, String> {
+        match args.first() {
+            Some(Value::String(p)) => Ok(p),
+            _ => Err(format!("{}: first argument must be a path string", who)),
+        }
+    }
+    b!("file-read", |args| {
+        let p = one_path(args, "file-read")?;
+        std::fs::read_to_string(p).map(Value::String)
+            .map_err(|e| format!("file-read: {}: {}", p, e))
+    });
+    b!("file-write", |args| {
+        let p = one_path(args, "file-write")?;
+        let c = match args.get(1) { Some(Value::String(s)) => s.clone(),
+                                    Some(other) => format!("{}", other),
+                                    None => return Err("file-write: (file-write path content)".into()) };
+        std::fs::write(p, c).map(|_| Value::Bool(true))
+            .map_err(|e| format!("file-write: {}: {}", p, e))
+    });
+    b!("file-append", |args| {
+        use std::io::Write;
+        let p = one_path(args, "file-append")?;
+        let c = match args.get(1) { Some(Value::String(s)) => s.clone(),
+                                    Some(other) => format!("{}", other),
+                                    None => return Err("file-append: (file-append path content)".into()) };
+        std::fs::OpenOptions::new().create(true).append(true).open(p)
+            .and_then(|mut f| f.write_all(c.as_bytes()))
+            .map(|_| Value::Bool(true))
+            .map_err(|e| format!("file-append: {}: {}", p, e))
+    });
+    b!("file-exists?", |args| {
+        Ok(Value::Bool(std::path::Path::new(one_path(args, "file-exists?")?).exists()))
+    });
+    b!("file-delete", |args| {
+        let p = one_path(args, "file-delete")?;
+        std::fs::remove_file(p).map(|_| Value::Bool(true))
+            .map_err(|e| format!("file-delete: {}: {}", p, e))
+    });
+    b!("dir-create", |args| {
+        let p = one_path(args, "dir-create")?;
+        std::fs::create_dir_all(p).map(|_| Value::Bool(true))
+            .map_err(|e| format!("dir-create: {}: {}", p, e))
+    });
+    b!("dir-list", |args| {
+        let p = one_path(args, "dir-list")?;
+        let mut names: Vec<String> = std::fs::read_dir(p)
+            .map_err(|e| format!("dir-list: {}: {}", p, e))?
+            .filter_map(|ent| ent.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect();
+        names.sort(); // deterministic — golden tests may list directories
+        Ok(list(names.into_iter().map(Value::String).collect()))
+    });
+    // Pure string utility (lived only in tutorial prose until 0.26.0):
+    // splits on a separator string, dropping empty pieces.
+    b!("string-split", |args| {
+        match (args.first(), args.get(1)) {
+            (Some(Value::String(s)), Some(Value::String(sep))) if !sep.is_empty() =>
+                Ok(list(s.split(sep.as_str())
+                        .filter(|p| !p.is_empty())
+                        .map(|p| Value::String(p.to_string())).collect())),
+            _ => Err("string-split: (string-split string separator)".into()),
+        }
+    });
+
     // ── Tool predicate ────────────────────────────────────────────────────
     b!("tool?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tool{..})))));
     b!("tool-name", |args| {

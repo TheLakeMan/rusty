@@ -21,6 +21,8 @@ pub fn effect_reason(op: &str) -> Option<&'static str> {
         "error" => Some("raises an error (a control-flow side effect)"),
         "shell" | "shell-run" => Some("runs a shell command"),
         "read-file" | "write-file" | "append-file" | "delete-file" | "file-exists" | "list-dir"
+        | "file-read" | "file-write" | "file-append" | "file-delete" | "file-exists?"
+        | "dir-create" | "dir-list" | "checkpoint"
             => Some("touches the filesystem"),
         "llm" | "tool-call" | "react-loop" => Some("calls an external LLM/tool"),
         "remember" | "recall" | "forget" | "memory-list" => Some("reads or writes persistent memory"),

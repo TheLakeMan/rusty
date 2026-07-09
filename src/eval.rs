@@ -376,7 +376,17 @@ impl Evaluator {
                                     .map_err(|e| format!("load: cannot read '{}': {}", path_str, e))?;
                                 let tokens = crate::lexer::Lexer::new(&code).tokenize();
                                 let ast    = crate::parser::Parser::new(tokens).parse();
-                                return self.eval_all(&ast, &env);
+                                // Loaded files evaluate at TOP LEVEL (the
+                                // global env), like Scheme's load — so a
+                                // load inside a function (e.g. pkg-load)
+                                // defines durable bindings, not frame-local
+                                // ones that vanish with the call.
+                                let mut top = env.clone();
+                                loop {
+                                    let parent = top.borrow().parent.clone();
+                                    match parent { Some(p) => top = p, None => break }
+                                }
+                                return self.eval_all(&ast, &top);
                             }
 
                             // ── (checkpoint "file.lisp") ────────────────
