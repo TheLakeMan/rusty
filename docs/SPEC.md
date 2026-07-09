@@ -2,7 +2,7 @@
 
 **Version:** 0.26.0 · **Status:** normative for the 0.x series
 **Conformance:** an implementation (or a change to this one) conforms iff
-`./run_tests.sh` passes — the eight golden files are the executable test
+`./run_tests.sh` passes — its golden files are the executable test
 suite for everything this document states.
 
 This is a precise *operational* description of the dialect as implemented
@@ -196,7 +196,7 @@ The **C ABI** (§9) is frozen as specified: one fixed signature per
 compilation path, symbol names `rusty_` + sanitized identifier. External
 callers may rely on it.
 
-The eight golden files under `run_tests.sh` are the compatibility suite:
+The golden files under `run_tests.sh` are the compatibility suite:
 any change that alters their expected output is by definition observable
 behavior and must be classified under the rules above before it ships.
 
