@@ -104,6 +104,18 @@ pub fn apply_value(f: &Value, args: &[Value], eval: &Evaluator) -> Result<Value,
             crate::trace::record_since("tool-call", name, t0, None);
             result
         }
+        Value::Native { name, arity, fn_ptr, .. } => {
+            if args.len() != *arity {
+                return Err(format!("{}: expected {} arg(s), got {}", name, arity, args.len()));
+            }
+            let nums: Result<Vec<f64>, String> = args.iter().map(|a| match a {
+                Value::Number(n) => Ok(*n),
+                other => Err(format!("{}: expected a number, got {}", name, other)),
+            }).collect();
+            Ok(Value::Number(crate::rust_jit::call(*fn_ptr, &nums?)))
+        }
+        Value::NativeGrad { name, fn_ptr, in_shapes, out_shapes, .. } =>
+            crate::rust_jit::call_native_grad(name, *fn_ptr, in_shapes, out_shapes, args),
         _ => Err(format!("Not callable: {}", f)),
     }
 }
@@ -408,9 +420,9 @@ pub fn setup_builtins(env: &Env) {
     b!("list?",      |args| Ok(Value::Bool(matches!(args.first(), Some(Value::List(_))|Some(Value::Nil)))));
     b!("pair?",      |args| Ok(Value::Bool(matches!(args.first(), Some(Value::List(v)) if !v.is_empty()))));
     b!("procedure?", |args| Ok(Value::Bool(matches!(args.first(),
-        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})|Some(Value::Tool{..})|Some(Value::Native{..})))));
+        Some(Value::Builtin(..))|Some(Value::Lambda{..})|Some(Value::Macro{..})|Some(Value::Tool{..})|Some(Value::Native{..})|Some(Value::NativeGrad{..})))));
     b!("macro?",     |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Macro{..})))));
-    b!("native?",    |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Native{..})))));
+    b!("native?",    |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Native{..})|Some(Value::NativeGrad{..})))));
     b!("type-of",    |args| Ok(Value::Symbol(match args.first() {
         Some(Value::Number(_))   => "number",
         Some(Value::Bool(_))     => "boolean",
@@ -424,6 +436,7 @@ pub fn setup_builtins(env: &Env) {
         Some(Value::Tool{..})   => "tool",
         Some(Value::Tensor{..}) => "tensor",
         Some(Value::Native{..}) => "native",
+        Some(Value::NativeGrad{..}) => "native-grad",
         None                     => "nil",
     }.to_string())));
     b!("tensor?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tensor{..})))));
@@ -633,10 +646,13 @@ pub fn setup_builtins(env: &Env) {
                 if k != k2 { return Err(format!("matmul: inner dimensions differ ({}x{} · {}x{})", m, k, k2, n)); }
                 let mut out = vec![0.0; m * n];
                 for i in 0..m {
+                    let a_row = &a[i * k..(i + 1) * k];
+                    let o_row = &mut out[i * n..(i + 1) * n];
                     for p in 0..k {
-                        let aip = a[i * k + p];
+                        let aip = a_row[p];
+                        let b_row = &b[p * n..(p + 1) * n];
                         for j in 0..n {
-                            out[i * n + j] += aip * b[p * n + j];
+                            o_row[j] += aip * b_row[j];
                         }
                     }
                 }
@@ -914,6 +930,43 @@ pub fn setup_builtins(env: &Env) {
             crate::graph_ir::GVal::Num(n) => Value::Number(n),
             crate::graph_ir::GVal::Tensor { data, shape } => Value::Tensor { data, shape },
         }).collect()))
+    });
+    // (graph-compile-grad (lambda (params...) loss-expr) example-args...) →
+    //   a callable #<native-grad> returning (loss grad-per-param...).
+    // Phase 3.3 kernel fusion, tensor half: the whole forward+backward graph
+    // compiles to ONE native function, shape-specialized to the example
+    // arguments (their VALUES are only used for shapes). Unlike graph-grad —
+    // which rebuilds and re-optimizes the graph on every call — all graph
+    // work happens once, here. Calling the result with differently-shaped
+    // tensors is an error: compile again for new shapes.
+    b!("graph-compile-grad", |args| {
+        let (params, body, rest) = match args.split_first() {
+            Some((Value::Lambda { params, body, .. }, rest)) => (params, body, rest),
+            _ => return Err("graph-compile-grad: (graph-compile-grad (lambda (params...) loss-expr) example-args...)".into()),
+        };
+        if body.len() != 1 { return Err("graph-compile-grad: lambda body must be a single expression".into()); }
+        if rest.len() != params.len() {
+            return Err(format!("graph-compile-grad: expected {} example arg(s), got {}", params.len(), rest.len()));
+        }
+        let in_shapes: Result<Vec<crate::graph_ir::SShape>, String> = rest.iter().map(|a| match a {
+            Value::Number(_) => Ok(None),
+            Value::Tensor { shape, .. } => Ok(Some(shape.clone())),
+            other => Err(format!("graph-compile-grad: expected a number or tensor, got {}", other)),
+        }).collect();
+        let in_shapes = in_shapes?;
+        let forward = crate::graph_ir::optimize(&crate::graph_ir::build(params, &body[0])?);
+        // Check the loss is scalar on the FORWARD graph, before backward() —
+        // otherwise shape inference trips on a generated gradient node (the
+        // scalar seed meeting e.g. a matmul) with a misleading internal error.
+        let fwd_shapes = crate::graph_ir::infer_shapes(&forward, &in_shapes)?;
+        if fwd_shapes[forward.output].is_some() {
+            return Err("graph-compile-grad: the loss must evaluate to a scalar (use tensor-sum or a mean)".into());
+        }
+        let (grown, grad_nodes) = crate::graph_ir::backward(&forward, params.len())?;
+        let mut outputs = vec![grown.output];
+        outputs.extend(grad_nodes);
+        let (opt, outs) = crate::graph_ir::optimize_outputs(&grown, &outputs);
+        crate::rust_jit::compile_graph_grad("grad-kernel", &opt, &outs, &in_shapes)
     });
 
     // ── Execution tracing (Phase 3.2) ─────────────────────────────────────

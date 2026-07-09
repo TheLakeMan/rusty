@@ -769,6 +769,9 @@ impl Evaluator {
                             }).collect();
                             return Ok(Value::Number(crate::rust_jit::call(fn_ptr, &nums?)));
                         }
+                        Value::NativeGrad { name, fn_ptr, in_shapes, out_shapes, .. } => {
+                            return crate::rust_jit::call_native_grad(&name, fn_ptr, &in_shapes, &out_shapes, &args);
+                        }
                         other => return Err(format!("Not callable: {}", other)),
                     }
                 }

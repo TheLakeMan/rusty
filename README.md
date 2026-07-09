@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.19.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.20.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -361,6 +361,26 @@ Benchmarked against single-thread float64 PyTorch 2.12.1 on the same machine
 433ms per 100 steps). PyTorch is the yardstick, never a dependency. Data-
 dependent `if` and comparisons are not differentiable and refuse cleanly;
 non-scalar losses are rejected (reduce with `tensor-sum` or a mean).
+
+#### Fused training kernels (graph-compile-grad)
+
+```lisp
+;; graph-grad rebuilds and re-optimizes the graph on every call. The fused
+;; alternative compiles the WHOLE forward+backward graph to one native
+;; function, shape-specialized to the example arguments (values are only
+;; used for their shapes) — every buffer size, loop bound, and matmul
+;; dimension becomes a compile-time constant in the generated Rust:
+(define step! (graph-compile-grad loss-fn X W B T))
+(step! X W B T)   ; => (loss gX gW gB gT) — bit-identical to graph-grad
+```
+
+Same workloads, fused vs interpreted (results bit-identical): the 8×16→8
+training loop drops 44ms → **15.8ms** (~3×, and **~37×** vs the PyTorch
+number above); 64×256→64 is parity (~125ms both ways) because naive-O(n³)
+matmul flops dominate — though that matmul itself got **~2.5× faster** in
+v0.20.0 (slice-based ikj loops, same summation order, so every bit-for-bit
+claim still holds). Calling a kernel with differently-shaped tensors is an
+error — compile again for new shapes, as you would re-trace a JIT.
 
 ### Agent / Tool Forms
 

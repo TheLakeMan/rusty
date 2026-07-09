@@ -328,32 +328,7 @@ pub fn compile_and_load_group(defs: &[FnDef]) -> Result<Vec<Value>, String> {
 /// load the `.so`, and resolve one `Value::Native` per requested symbol.
 /// `wants` is (Lisp name, Rust symbol, arity) per function.
 fn build_and_load(source: &str, wants: &[(String, String, usize)]) -> Result<Vec<Value>, String> {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    let so_ext = if cfg!(target_os = "macos") { "dylib" } else if cfg!(target_os = "windows") { "dll" } else { "so" };
-    let dir = cache_dir();
-    let base = &wants[0].1;
-    let so_path  = dir.join(format!("{}_{:x}.{}", base, hash, so_ext));
-    let src_path = dir.join(format!("{}_{:x}.rs", base, hash));
-
-    if !so_path.exists() {
-        std::fs::write(&src_path, source)
-            .map_err(|e| format!("defrust: cannot write {}: {}", src_path.display(), e))?;
-        let output = std::process::Command::new("rustc")
-            .args(["--edition", "2021", "-O", "--crate-type", "cdylib", "-o"])
-            .arg(&so_path)
-            .arg(&src_path)
-            .output()
-            .map_err(|e| format!("defrust: failed to run rustc (is it on PATH?): {}", e))?;
-        if !output.status.success() {
-            return Err(format!("defrust: rustc failed:\n{}", String::from_utf8_lossy(&output.stderr)));
-        }
-    }
-
-    let lib = Rc::new(unsafe { libloading::Library::new(&so_path) }
-        .map_err(|e| format!("defrust: failed to load {}: {}", so_path.display(), e))?);
+    let lib = build_lib(source, &wants[0].1)?;
     wants.iter().map(|(lisp_name, rust_name, arity)| {
         let fn_ptr: *const () = unsafe {
             let sym: libloading::Symbol<unsafe extern "C" fn(*const f64, usize) -> f64> = lib
@@ -363,6 +338,40 @@ fn build_and_load(source: &str, wants: &[(String, String, usize)]) -> Result<Vec
         };
         Ok(Value::Native { name: lisp_name.clone(), arity: *arity, lib: lib.clone(), fn_ptr })
     }).collect()
+}
+
+/// Write source, `rustc` it (cached on disk by source hash), load the `.so`.
+/// Symbol resolution is the caller's job — ABIs differ per compilation path.
+const RUSTC_FLAGS: [&str; 6] = ["--edition", "2021", "-C", "opt-level=3", "--crate-type", "cdylib"];
+
+fn build_lib(source: &str, base: &str) -> Result<Rc<libloading::Library>, String> {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    RUSTC_FLAGS.hash(&mut hasher); // changed flags must invalidate cached .so's
+    let hash = hasher.finish();
+
+    let so_ext = if cfg!(target_os = "macos") { "dylib" } else if cfg!(target_os = "windows") { "dll" } else { "so" };
+    let dir = cache_dir();
+    let so_path  = dir.join(format!("{}_{:x}.{}", base, hash, so_ext));
+    let src_path = dir.join(format!("{}_{:x}.rs", base, hash));
+
+    if !so_path.exists() {
+        std::fs::write(&src_path, source)
+            .map_err(|e| format!("defrust: cannot write {}: {}", src_path.display(), e))?;
+        let output = std::process::Command::new("rustc")
+            .args(RUSTC_FLAGS)
+            .arg("-o")
+            .arg(&so_path)
+            .arg(&src_path)
+            .output()
+            .map_err(|e| format!("defrust: failed to run rustc (is it on PATH?): {}", e))?;
+        if !output.status.success() {
+            return Err(format!("defrust: rustc failed:\n{}", String::from_utf8_lossy(&output.stderr)));
+        }
+    }
+
+    Ok(Rc::new(unsafe { libloading::Library::new(&so_path) }
+        .map_err(|e| format!("defrust: failed to load {}: {}", so_path.display(), e))?))
 }
 
 // ── Kernel fusion: optimized Graph IR → one fused native function ───────
@@ -427,4 +436,211 @@ pub fn compile_and_load(name: &str, params: &[String], body: &Expr) -> Result<Va
 pub fn call(fn_ptr: *const (), args: &[f64]) -> f64 {
     let f: unsafe extern "C" fn(*const f64, usize) -> f64 = unsafe { std::mem::transmute(fn_ptr) };
     unsafe { f(args.as_ptr(), args.len()) }
+}
+
+// ── Tensor kernel fusion (Phase 3.3, tensor half) ────────────────────────
+//
+// `graph-compile-grad` compiles a whole forward+backward training graph to
+// ONE native function, shape-specialized: every buffer size, loop bound,
+// and matmul dimension is a compile-time constant in the generated Rust.
+// ABI: `extern "C" fn(inp: *const f64, out: *mut f64)` — inputs flattened
+// and concatenated in param order; outputs are loss then each gradient,
+// flattened, at statically known offsets.
+
+use crate::graph_ir::{Graph, Op, SShape};
+
+fn ssize(s: &SShape) -> usize {
+    match s { None => 1, Some(sh) => sh.iter().product() }
+}
+
+pub fn compile_graph_grad(
+    name: &str,
+    graph: &Graph,
+    outputs: &[usize],
+    in_shapes: &[SShape],
+) -> Result<Value, String> {
+    let shapes = crate::graph_ir::infer_shapes(graph, in_shapes)?;
+    if shapes[outputs[0]].is_some() {
+        return Err("graph-grad: the loss must evaluate to a scalar (use tensor-sum or a mean)".into());
+    }
+
+    // Input offsets, one per param, in param order.
+    let mut in_off = Vec::with_capacity(in_shapes.len());
+    let mut off = 0usize;
+    for s in in_shapes { in_off.push(off); off += ssize(s); }
+
+    let mut body = String::new();
+    for (i, node) in graph.nodes.iter().enumerate() {
+        let a = node.args.first().copied().unwrap_or(0);
+        let b = node.args.get(1).copied().unwrap_or(0);
+        let (sa, sb) = (node.args.first().map(|&x| &shapes[x]), node.args.get(1).map(|&x| &shapes[x]));
+        let expr = match &node.op {
+            Op::Const(bits) => format!("f64::from_bits({}u64) /* {:?} */", bits, f64::from_bits(*bits)),
+            Op::Param(p) => match &in_shapes[*p] {
+                None => format!("unsafe {{ *inp.add({}) }}", in_off[*p]),
+                Some(sh) => format!(
+                    "unsafe {{ std::slice::from_raw_parts(inp.add({}), {}) }}.to_vec()",
+                    in_off[*p], sh.iter().product::<usize>()),
+            },
+            Op::Add => format!("v{} + v{}", a, b),
+            Op::Sub => format!("v{} - v{}", a, b),
+            Op::Mul => format!("v{} * v{}", a, b),
+            Op::Div => format!("v{} / v{}", a, b),
+            Op::Lt  => format!("if v{} <  v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::Gt  => format!("if v{} >  v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::Le  => format!("if v{} <= v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::Ge  => format!("if v{} >= v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::Eq  => format!("if v{} == v{} {{ 1.0_f64 }} else {{ 0.0_f64 }}", a, b),
+            Op::If  => {
+                let (t, e) = (node.args[1], node.args[2]);
+                if shapes[t].is_some() {
+                    format!("if v{} != 0.0 {{ v{}.clone() }} else {{ v{}.clone() }}", a, t, e)
+                } else {
+                    format!("if v{} != 0.0 {{ v{} }} else {{ v{} }}", a, t, e)
+                }
+            }
+            Op::TAdd | Op::TSub | Op::TMul | Op::TDiv => {
+                let o = match node.op { Op::TAdd => "+", Op::TSub => "-", Op::TMul => "*", _ => "/" };
+                match (sa.unwrap(), sb.unwrap()) {
+                    (Some(_), Some(_)) => format!(
+                        "v{}.iter().zip(v{}.iter()).map(|(x, y)| x {} y).collect::<Vec<f64>>()", a, b, o),
+                    (Some(_), None) => format!(
+                        "v{}.iter().map(|x| x {} v{}).collect::<Vec<f64>>()", a, o, b),
+                    (None, Some(_)) => format!(
+                        "v{}.iter().map(|y| v{} {} y).collect::<Vec<f64>>()", b, a, o),
+                    (None, None) => format!("v{} {} v{}", a, o, b),
+                }
+            }
+            Op::MatMul => {
+                let (x, y) = (sa.unwrap().as_ref().unwrap(), sb.unwrap().as_ref().unwrap());
+                let (m, k, n) = (x[0], x[1], y[1]);
+                // ikj order with row slices: same per-element accumulation
+                // order as the interpreter's t_matmul (p ascending — results
+                // stay bit-identical), but contiguous access on both sides
+                // and an inner loop that is elementwise FMA into distinct
+                // slots, so LLVM can vectorize it without reassociating.
+                format!(
+                    "{{ let mut o = vec![0.0_f64; {m} * {n}]; \
+                       for i in 0..{m} {{ \
+                       let a_row = &v{a}[i * {k}..(i + 1) * {k}]; \
+                       let o_row = &mut o[i * {n}..(i + 1) * {n}]; \
+                       for p in 0..{k} {{ let x = a_row[p]; \
+                       let b_row = &v{b}[p * {n}..(p + 1) * {n}]; \
+                       for j in 0..{n} {{ o_row[j] += x * b_row[j]; }} }} }} o }}",
+                    m = m, k = k, n = n, a = a, b = b)
+            }
+            Op::Transpose => {
+                let x = sa.unwrap().as_ref().unwrap();
+                let (m, n) = (x[0], x[1]);
+                format!(
+                    "{{ let mut o = vec![0.0_f64; {n} * {m}]; \
+                       for i in 0..{m} {{ for j in 0..{n} {{ o[j * {m} + i] = v{a}[i * {n} + j]; }} }} o }}",
+                    m = m, n = n, a = a)
+            }
+            Op::TSum => match sa.unwrap() {
+                Some(_) => format!("v{}.iter().sum::<f64>()", a),
+                None => format!("v{}", a),
+            },
+            Op::Relu => match sa.unwrap() {
+                Some(_) => format!("v{}.iter().map(|x| x.max(0.0)).collect::<Vec<f64>>()", a),
+                None => format!("v{}.max(0.0)", a),
+            },
+            Op::Step => match sa.unwrap() {
+                Some(_) => format!(
+                    "v{}.iter().map(|x| if *x > 0.0 {{ 1.0_f64 }} else {{ 0.0_f64 }}).collect::<Vec<f64>>()", a),
+                None => format!("if v{} > 0.0 {{ 1.0_f64 }} else {{ 0.0_f64 }}", a),
+            },
+            // Inference already validated these, so each is one exact arm here:
+            Op::SumTo => match (sa.unwrap(), sb.unwrap()) {
+                (Some(_), None) => format!("v{}.iter().sum::<f64>()", a),
+                (None, None)    => format!("v{}", a),
+                _               => format!("v{}.clone()", a), // same-shape identity
+            },
+            Op::Expand => match sb.unwrap() {
+                None => format!("v{}", a),
+                Some(sh) => format!("vec![v{}; {}]", a, sh.iter().product::<usize>()),
+            },
+        };
+        body.push_str(&format!("    let v{} = {};\n", i, expr));
+    }
+
+    // Outputs: loss at offset 0, then each gradient, flattened.
+    let out_shapes: Vec<SShape> = outputs.iter().map(|&o| shapes[o].clone()).collect();
+    let mut out_off = 0usize;
+    for (&o, s) in outputs.iter().zip(&out_shapes) {
+        match s {
+            None => body.push_str(&format!("    unsafe {{ *out.add({}) = v{}; }}\n", out_off, o)),
+            Some(sh) => body.push_str(&format!(
+                "    unsafe {{ std::ptr::copy_nonoverlapping(v{}.as_ptr(), out.add({}), {}); }}\n",
+                o, out_off, sh.iter().product::<usize>())),
+        }
+        out_off += ssize(s);
+    }
+
+    let rust_name = sanitize_ident(name);
+    let source = format!(
+        "#[allow(unused_variables)]\n#[no_mangle]\n\
+         pub extern \"C\" fn {name}(inp: *const f64, out: *mut f64) {{\n{body}}}\n",
+        name = rust_name, body = body,
+    );
+    let lib = build_lib(&source, &rust_name)?;
+    let fn_ptr: *const () = unsafe {
+        let sym: libloading::Symbol<unsafe extern "C" fn(*const f64, *mut f64)> = lib
+            .get(rust_name.as_bytes())
+            .map_err(|e| format!("graph-compile-grad: symbol '{}' not found: {}", rust_name, e))?;
+        *sym as *const ()
+    };
+    Ok(Value::NativeGrad {
+        name: name.to_string(),
+        lib,
+        fn_ptr,
+        in_shapes: Rc::new(in_shapes.to_vec()),
+        out_shapes: Rc::new(out_shapes),
+    })
+}
+
+/// Marshal Lisp args into the flat input buffer, run a fused grad kernel,
+/// and unpack `(loss grad-per-param...)` — the exact result shape
+/// `graph-grad` produces. Shared by the eval dispatch and `apply`.
+pub fn call_native_grad(
+    name: &str,
+    fn_ptr: *const (),
+    in_shapes: &[SShape],
+    out_shapes: &[SShape],
+    args: &[Value],
+) -> Result<Value, String> {
+    if args.len() != in_shapes.len() {
+        return Err(format!("{}: expected {} arg(s), got {}", name, in_shapes.len(), args.len()));
+    }
+    let mut inp: Vec<f64> = Vec::with_capacity(in_shapes.iter().map(ssize).sum());
+    for (arg, want) in args.iter().zip(in_shapes) {
+        match (arg, want) {
+            (Value::Number(n), None) => inp.push(*n),
+            (Value::Tensor { data, shape }, Some(sh)) if shape == sh => inp.extend(data.iter()),
+            (Value::Tensor { shape, .. }, Some(sh)) => return Err(format!(
+                "{}: compiled for shape {:?}, got {:?} — run graph-compile-grad again for new shapes",
+                name, sh, shape)),
+            (other, want) => return Err(format!(
+                "{}: expected {}, got {}", name,
+                match want { None => "a number".to_string(), Some(sh) => format!("a tensor of shape {:?}", sh) },
+                other)),
+        }
+    }
+    let mut out = vec![0.0_f64; out_shapes.iter().map(ssize).sum()];
+    let f: unsafe extern "C" fn(*const f64, *mut f64) = unsafe { std::mem::transmute(fn_ptr) };
+    unsafe { f(inp.as_ptr(), out.as_mut_ptr()) };
+
+    let mut results = Vec::with_capacity(out_shapes.len());
+    let mut off = 0usize;
+    for s in out_shapes {
+        match s {
+            None => results.push(Value::Number(out[off])),
+            Some(sh) => results.push(Value::Tensor {
+                data: Rc::new(out[off..off + sh.iter().product::<usize>()].to_vec()),
+                shape: sh.clone(),
+            }),
+        }
+        off += ssize(s);
+    }
+    Ok(crate::env::list(results))
 }

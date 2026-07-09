@@ -62,6 +62,19 @@ pub enum Value {
         lib:     Rc<libloading::Library>,
         fn_ptr:  *const (),
     },
+    // A `graph-compile-grad` fused training kernel (Phase 3.3 kernel fusion,
+    // tensor half): the whole forward+backward graph compiled to native code,
+    // shape-specialized to the example arguments it was compiled with.
+    // `fn_ptr` is `extern "C" fn(*const f64, *mut f64)` — flattened inputs
+    // in, loss + flattened gradients out. `None` in a shape slot = scalar.
+    NativeGrad {
+        name:       String,
+        #[allow(dead_code)] // never read — held only to keep the .so mapped
+        lib:        Rc<libloading::Library>,
+        fn_ptr:     *const (),
+        in_shapes:  Rc<Vec<Option<Vec<usize>>>>,
+        out_shapes: Rc<Vec<Option<Vec<usize>>>>,
+    },
     Nil,
 }
 
@@ -107,6 +120,13 @@ impl std::fmt::Display for Value {
                 }
             }
             Value::Native { name, arity, .. } => write!(f, "#<native:{}/{}>", name, arity),
+            Value::NativeGrad { name, in_shapes, .. } => {
+                let dims: Vec<String> = in_shapes.iter().map(|s| match s {
+                    None => "scalar".to_string(),
+                    Some(sh) => sh.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("x"),
+                }).collect();
+                write!(f, "#<native-grad:{} ({})>", name, dims.join(" "))
+            }
             Value::Nil => write!(f, "()"),
         }
     }

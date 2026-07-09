@@ -132,7 +132,7 @@ fn value_to_expr(v: &Value) -> Option<String> {
         // Tools are env-bound by name too; reference works if the tool
         // itself is also checkpointed (it is — see value_to_defform).
         Value::Tool { name, .. } => Some(name.clone()),
-        Value::Macro { .. } | Value::Native { .. } => None,
+        Value::Macro { .. } | Value::Native { .. } | Value::NativeGrad { .. } => None,
         _ => None,
     }
 }
@@ -176,6 +176,7 @@ pub fn write_checkpoint(path: &str, env: &Env) -> Result<Value, String> {
             match v {
                 Value::Builtin(..) => continue,
                 Value::Native { .. } => { skipped.push(format!("{} (defrust native — re-run its defrust to restore)", name)); continue }
+                Value::NativeGrad { .. } => { skipped.push(format!("{} (fused grad kernel — re-run graph-compile-grad to restore)", name)); continue }
                 // Baseline code (stdlib functions/macros): assumed unmodified.
                 Value::Lambda { .. } | Value::Macro { .. } | Value::Tool { .. }
                     if baseline.contains_key(name.as_str()) => continue,

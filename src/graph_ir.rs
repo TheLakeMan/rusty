@@ -476,10 +476,13 @@ fn t_matmul(a: &GVal, b: &GVal) -> Result<GVal, String> {
             }
             let mut data = vec![0.0; n * m];
             for i in 0..n {
+                let x_row = &xd[i * k..(i + 1) * k];
+                let o_row = &mut data[i * m..(i + 1) * m];
                 for p in 0..k {
-                    let x = xd[i * k + p];
+                    let x = x_row[p];
+                    let y_row = &yd[p * m..(p + 1) * m];
                     for j in 0..m {
-                        data[i * m + j] += x * yd[p * m + j];
+                        o_row[j] += x * y_row[j];
                     }
                 }
             }
@@ -588,6 +591,84 @@ fn eval_nodes(graph: &Graph, inputs: &[GVal]) -> Result<Vec<GVal>, String> {
         vals.push(v);
     }
     Ok(vals)
+}
+
+// ── Static shape inference (Phase 3.3 tensor kernel fusion) ──────────────
+//
+// `None` = scalar, `Some(shape)` = tensor. Mirrors `eval_nodes`' runtime
+// rules exactly (including scalar broadcast on the T-ops and the
+// loss-must-be-scalar diagnosis on SumTo), but over shapes only — this is
+// what lets `graph-compile-grad` specialize a kernel with every buffer
+// size, loop bound, and matmul dimension a compile-time constant.
+
+pub type SShape = Option<Vec<usize>>;
+
+pub fn infer_shapes(graph: &Graph, inputs: &[SShape]) -> Result<Vec<SShape>, String> {
+    let mut shapes: Vec<SShape> = Vec::with_capacity(graph.nodes.len());
+    for node in &graph.nodes {
+        let a = node.args.first().map(|&x| shapes[x].clone());
+        let b = node.args.get(1).map(|&x| shapes[x].clone());
+        let s = match &node.op {
+            Op::Const(_) => None,
+            Op::Param(p) => inputs.get(*p)
+                .ok_or_else(|| format!("graph-compile-grad: missing shape for param {}", p))?
+                .clone(),
+            Op::Add | Op::Sub | Op::Mul | Op::Div
+            | Op::Lt | Op::Gt | Op::Le | Op::Ge | Op::Eq => {
+                if a.clone().flatten().is_some() || b.clone().flatten().is_some() {
+                    return Err("graph-compile-grad: scalar op applied to a tensor (use tensor-add etc.)".into());
+                }
+                None
+            }
+            Op::If => {
+                let t = shapes[node.args[1]].clone();
+                let e = shapes[node.args[2]].clone();
+                if shapes[node.args[0]].is_some() {
+                    return Err("graph-compile-grad: `if` condition must be a scalar".into());
+                }
+                if t != e {
+                    return Err("graph-compile-grad: `if` branches must have the same shape".into());
+                }
+                t
+            }
+            Op::TAdd | Op::TSub | Op::TMul | Op::TDiv => {
+                match (a.clone().unwrap(), b.clone().unwrap()) {
+                    (Some(x), Some(y)) if x == y => Some(x),
+                    (Some(x), Some(y)) => return Err(format!(
+                        "graph-compile-grad: elementwise op on mismatched shapes {:?} vs {:?}", x, y)),
+                    (Some(x), None) | (None, Some(x)) => Some(x), // scalar broadcast
+                    (None, None) => None,
+                }
+            }
+            Op::MatMul => match (a.clone().unwrap(), b.clone().unwrap()) {
+                (Some(x), Some(y)) if x.len() == 2 && y.len() == 2 && x[1] == y[0] =>
+                    Some(vec![x[0], y[1]]),
+                (x, y) => return Err(format!(
+                    "graph-compile-grad: matmul needs rank-2 tensors with matching inner dim, got {:?} × {:?}", x, y)),
+            },
+            Op::Transpose => match a.clone().unwrap() {
+                Some(x) if x.len() == 2 => Some(vec![x[1], x[0]]),
+                x => return Err(format!("graph-compile-grad: transpose needs a rank-2 tensor, got {:?}", x)),
+            },
+            Op::TSum => None,
+            Op::Relu | Op::Step => a.clone().unwrap(),
+            Op::SumTo => match (a.clone().unwrap(), b.clone().unwrap()) {
+                (_, None) => None,
+                (Some(x), Some(like)) if x == like => Some(x),
+                (Some(x), Some(like)) => return Err(format!(
+                    "graph-grad: internal SumTo shape mismatch {:?} vs {:?}", x, like)),
+                (None, Some(_)) =>
+                    return Err("graph-grad: the loss must evaluate to a scalar (use tensor-sum or a mean)".into()),
+            },
+            Op::Expand => match (a.clone().unwrap(), b.clone().unwrap()) {
+                (None, like) => like,
+                (Some(_), _) =>
+                    return Err("graph-grad: internal Expand — expected a scalar gradient".into()),
+            },
+        };
+        shapes.push(s);
+    }
+    Ok(shapes)
 }
 
 // ── Inspect: Graph → Lisp data ────────────────────────────────────────────
