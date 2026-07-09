@@ -40,6 +40,7 @@ run_test "prover-test.lisp"  "expected_prover.txt" "prover-test.lisp (proof assi
 run_test "robot-test.lisp"   "expected_robot.txt"  "robot-test.lisp (safe control)"
 run_test "pkg-test.lisp"     "expected_pkg.txt"    "pkg-test.lisp (package manager)"
 run_test "testkit-test.lisp" "expected_testkit.txt" "testkit-test.lisp (testing framework)"
+run_test "kg-test.lisp"      "expected_kg.txt"     "kg-test.lisp (knowledge graph)"
 
 # rusty-lsp speaks framed JSON-RPC on stdio — a scripted session instead of a golden diff
 if python3 lsp-test.py > /dev/null 2>&1; then

@@ -27,6 +27,7 @@ mod checkpoint;
 mod trace;
 mod type_check;
 mod effect_check;
+mod kg;
 
 use serde_json::{json, Value as J};
 use std::collections::HashMap;

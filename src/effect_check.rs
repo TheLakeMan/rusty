@@ -26,6 +26,9 @@ pub fn effect_reason(op: &str) -> Option<&'static str> {
             => Some("touches the filesystem"),
         "llm" | "tool-call" | "react-loop" => Some("calls an external LLM/tool"),
         "remember" | "recall" | "forget" | "memory-list" => Some("reads or writes persistent memory"),
+        "kg-add!" | "kg-clear!" | "kg-query" | "kg-count" | "kg-triples"
+        | "kg-load-ntriples" | "kg-save-ntriples"
+            => Some("reads or writes the knowledge graph"),
         "gensym" => Some("non-deterministic — returns a different value each call"),
         "load" | "load-relative" => Some("loads and executes another file"),
         _ => None,

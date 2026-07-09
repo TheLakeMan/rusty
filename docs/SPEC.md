@@ -172,6 +172,16 @@ semantics, but their contracts are stable:
   (bounded proof assistant — "proved" always means checked on every
   point of stated finite domains), `robot.lisp` (deterministic control +
   inductive safety).
+- **Knowledge graph** (1.3): `kg-add!`/`kg-clear!`/`kg-count`/`kg-triples`
+  over a native, insertion-ordered, deduped triple store; `kg-query`
+  solves a list of `(s p o)` patterns conjunctively, `?`-prefixed
+  symbols are variables shared across patterns, results are lists of
+  binding alists in insertion order. `kg-save-ntriples`/
+  `kg-load-ntriples` bridge to W3C N-Triples (symbols ↔ `urn:rusty:`
+  IRIs, strings ↔ literals, numbers ↔ `xsd:double`) — RDF is treated
+  as an interchange *format*; there is no external database. Rules
+  (`kg-rule!`/`kg-infer!`, kg.lisp) forward-chain to fixpoint and
+  return the count of newly derived triples.
 - **LLM** (`llm`, `react-loop`): local llama-server-compatible endpoint;
   `RUSTY_MODEL`/`RUSTY_LLM_URL`/`RUSTY_SYSTEM`/`RUSTY_LLM_TIMEOUT_SECS`
   environment variables. LLM output is text/data until it passes the

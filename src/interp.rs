@@ -1175,6 +1175,38 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
+    // ── Knowledge graph (Phase 1.3, self-built — src/kg.rs) ──────────────
+    b!("kg-clear!", |_| { crate::kg::clear(); Ok(Value::Bool(true)) });
+    b!("kg-add!", |args| {
+        match (args.first(), args.get(1), args.get(2)) {
+            (Some(s), Some(p), Some(o)) =>
+                Ok(Value::Bool(crate::kg::add(s.clone(), p.clone(), o.clone()))),
+            _ => Err("kg-add!: (kg-add! subject predicate object)".into()),
+        }
+    });
+    b!("kg-count", |_| Ok(Value::Number(crate::kg::count() as f64)));
+    b!("kg-triples", |_| Ok(crate::kg::triples()));
+    // (kg-query '((s p o)...)) — ?vars unify across patterns; returns a
+    // list of binding alists, one per solution.
+    b!("kg-query", |args| {
+        match args.first() {
+            Some(v) => crate::kg::query(v),
+            None => Err("kg-query: (kg-query '((s p o) ...))".into()),
+        }
+    });
+    b!("kg-save-ntriples", |args| {
+        match args.first() {
+            Some(Value::String(p)) => crate::kg::save_ntriples(p).map(|n| Value::Number(n as f64)),
+            _ => Err("kg-save-ntriples: (kg-save-ntriples path)".into()),
+        }
+    });
+    b!("kg-load-ntriples", |args| {
+        match args.first() {
+            Some(Value::String(p)) => crate::kg::load_ntriples(p).map(|n| Value::Number(n as f64)),
+            _ => Err("kg-load-ntriples: (kg-load-ntriples path)".into()),
+        }
+    });
+
     // ── Tool predicate ────────────────────────────────────────────────────
     b!("tool?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tool{..})))));
     b!("tool-name", |args| {

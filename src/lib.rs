@@ -26,6 +26,7 @@ mod checkpoint;
 mod trace;
 mod type_check;
 mod effect_check;
+mod kg;
 
 use eval::Evaluator;
 use interp::{make_env, run_code, print_repr};

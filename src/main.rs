@@ -10,6 +10,7 @@ mod checkpoint;
 mod trace;
 mod type_check;
 mod effect_check;
+mod kg;
 
 use env::Value;
 use eval::Evaluator;
