@@ -128,8 +128,8 @@ Everything here was already built self-contained, before "no external runtime de
 **Goal:** Establish Rusty as a recognized standard.
 
 ### 5.1 Language Stability
-- [ ] **Language specification**: Formal semantics for Rusty Lisp dialect
-- [ ] **Backwards compatibility**: Stable ABI; no breaking changes without major version bump
+- [x] **Language specification**: Formal semantics for Rusty Lisp dialect. Done (v0.25.0, docs-only): `docs/SPEC.md` — a precise operational description of the implemented dialect: lexical structure, the value universe, **truthiness (`#f` is the only false value — `()`, `0`, `""` are all true)**, numeric-vs-structural equality, the evaluation model with the exact list of guaranteed tail positions, the full special-form catalog, macro hygiene semantics (definition-time renaming of template-bound identifiers; `,x` untouched), the compiled subsets and their C ABIs, the stable contracts of every capability layer, and a deliberate-non-features list. Every behavioral claim in it was spot-checked against the binary before committing. Honest scope: operational prose, not a mechanized semantics — the eight golden files are the executable conformance suite, stated as such.
+- [x] **Backwards compatibility**: Stable ABI; no breaking changes without major version bump. Done (v0.25.0): SPEC.md §11 is the policy — semver discipline within 0.x (patch = fixes, minor = additive only), an enumerated list of what counts as breaking (evaluation rules, truthiness, equality, special forms, the `defrust` C ABI, checkpoint/save-model formats — all require a major bump + migration note + SPEC update in the same commit), the C ABI frozen as specified, and the golden suite designated as the compatibility suite: any change to expected outputs is by definition observable and must be classified before shipping.
 - [ ] **Comprehensive documentation**: Tutorial, reference, best practices guides
 - **Deliverable:** v1.0.0 release with semantic versioning
 
