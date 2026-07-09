@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.13.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.14.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -353,6 +353,30 @@ non-scalar losses are rejected (reduce with `tensor-sum` or a mean).
 (llm prompt temperature max-tokens)
 (shell "command")
 ```
+
+### Actor-Model Message Passing
+
+```lisp
+;; Agents are named handlers with FIFO mailboxes (std.lisp, Phase 3.2).
+;; A deterministic scheduler pops one message at a time in spawn order and
+;; runs the handler to completion; handlers may send! more messages.
+(agent-spawn 'square (lambda (msg) (send! 'collector (* msg msg))))
+(define total 0)
+(agent-spawn 'collector (lambda (msg) (set! total (+ total msg))))
+(send! 'square 3)
+(send! 'square 4)
+(run-agents)          ; => (quiescent 4) — ran until every mailbox emptied
+total                 ; => 25
+
+(run-agents 50)       ; explicit step cap: runaway systems return
+                      ;    (hit-max-steps 50) instead of looping forever
+(send! 'nobody 1)     ; => (error no-such-agent nobody) — errors are data
+(agent-names) (mailbox-count 'square) (agent-reset!)
+```
+
+Cooperative and single-threaded by design (Rusty's runtime is `Rc`-based):
+concurrency means deterministic interleaved message handling, not threads.
+An LLM-backed agent is just a handler that calls `llm`.
 
 ### Error Handling
 

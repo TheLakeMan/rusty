@@ -512,6 +512,75 @@
                              (list (list name 'undeclared-effects lies)))
                          problems))))))))))
 
+;; ── Actor-model message passing (Phase 3.2) ────────────────────────────────
+;; Agents are named handler functions with a FIFO mailbox each. (send! to msg)
+;; enqueues; (run-agents) pops one message at a time — agents visited in spawn
+;; order, deterministic — and runs the recipient's handler to completion,
+;; which may send! more messages. Runs until every mailbox is empty
+;; ('quiescent) or the step cap is hit ('hit-max-steps — the guard against
+;; infinite ping-pong). Handlers hold state by set!-ing an enclosing binding.
+;; Single-threaded and cooperative by design: Rusty's runtime is Rc-based, so
+;; concurrency here means interleaved message handling, not threads.
+
+(define *agents* '())      ; ((name handler) ...) in spawn order
+(define *mailboxes* '())   ; ((name (msg ...)) ...) FIFO queues
+
+(define (agent-reset!)
+  (set! *agents* '())
+  (set! *mailboxes* '())
+  'ok)
+
+(define (agent-spawn name handler)
+  (if (assoc name *agents*)
+      (list 'error 'agent-exists name)
+      (begin
+        (set! *agents* (append *agents* (list (list name handler))))
+        (set! *mailboxes* (append *mailboxes* (list (list name '()))))
+        name)))
+
+(define (agent-names) (map car *agents*))
+
+(define (mailbox-count name)
+  (let ((e (assoc name *mailboxes*)))
+    (if e (length (cadr e)) (list 'error 'no-such-agent name))))
+
+(define (mailbox-set! name q)
+  (set! *mailboxes*
+        (map (lambda (e) (if (equal? (car e) name) (list name q) e))
+             *mailboxes*)))
+
+(define (send! to msg)
+  (let ((e (assoc to *mailboxes*)))
+    (if e
+        (begin (mailbox-set! to (append (cadr e) (list msg))) 'sent)
+        (list 'error 'no-such-agent to))))
+
+;; Process exactly one pending message (first spawned agent with a non-empty
+;; mailbox). Returns #t if a message was handled, #f if all mailboxes empty.
+(define (agents-step)
+  (let scan ((as *agents*))
+    (if (null? as)
+        #f
+        (let* ((name (car (car as)))
+               (handler (cadr (car as)))
+               (q (cadr (assoc name *mailboxes*))))
+          (if (null? q)
+              (scan (cdr as))
+              (begin
+                (mailbox-set! name (cdr q))   ; dequeue BEFORE handling, so a
+                (handler (car q))             ; handler send!-ing to itself works
+                #t))))))
+
+(define (agents-idle?)
+  (null? (filter (lambda (e) (not (null? (cadr e)))) *mailboxes*)))
+
+(define (run-agents . opt)
+  (let ((max-steps (if (null? opt) 10000 (car opt))))
+    (let loop ((n 0))
+      (cond ((agents-idle?) (list 'quiescent n))
+            ((>= n max-steps) (list 'hit-max-steps n))
+            (else (begin (agents-step) (loop (+ n 1))))))))
+
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
   (load "agent.lisp")
