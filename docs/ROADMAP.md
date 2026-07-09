@@ -167,7 +167,7 @@ This section is now stale relative to actual progress — most of it shipped in 
 - [x] Complete ARCHITECTURE.md documenting evaluator and macro system — evaluator/macro sections were already there; completed with a current subsystem map (v0.25.0) covering everything shipped since (graph IR, checkers, tracing, checkpoint, actors, synthesis/prover layers), replacing the stale "Future Improvements" list.
 - [x] Write 3 macro examples showing code generation potential — TUTORIAL.md §3: `defrecord` (constructor + per-field getters from one call), `define-memo` (a define that generates its own cache), `defproperty` (compact syntax → exhaustive-check harness). All three verified running; the third documents the literal-`lambda`-in-template hygiene trap and its house fix.
 - [x] Benchmark current macro performance — `(macro-profile-on)`/`(macro-profile-report)`/`(show-macro-profile)`, Phase 1.1
-- [ ] Set up CI/CD with performance regression detection
+- [x] Set up CI/CD with performance regression detection — CI (build + golden suite + clippy) already existed; added the `perf` job running `benchmarks/perf_gate.lisp`: **ratio-based gates** (defrust-vs-interpreted speedup ≥ 50× — healthy ~334×; fusion-vs-tree-walk ≥ 3× on a 170-node kernel — healthy ~23×; plus an exact-agreement correctness check), chosen because compiled-vs-interpreted ratios on the *same* runner are machine-independent, so noisy shared-runner clocks can't flake the gate while any real regression trips it.
 
 ### Next Sprint (Month 2)
 - [x] Implement compile-time evaluation (`eval-when`) — Phase 1.1
