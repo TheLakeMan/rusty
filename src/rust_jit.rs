@@ -1,11 +1,14 @@
-//! rust_jit.rs — `defrust`: compile a restricted numeric Lisp subset to real
-//! Rust, via `rustc` + dynamic loading.
+//! rust_jit.rs — `defrust` / `defrust*`: compile a restricted numeric Lisp
+//! subset to real Rust, via `rustc` + dynamic loading.
 //!
-//! Scope (deliberately small — see docs/ROADMAP.md 1.2 for the reasoning):
-//! body may only contain numbers, the function's own params, `+ - * /`,
-//! `if` with a comparison/`and`/`or`/`not` condition, and self-recursive
-//! calls. No calls to *other* `defrust` functions (that needs cross-.so
-//! linking, cut from v1), no lists/strings/closures/global capture.
+//! Scope (deliberately numeric-only — see docs/ROADMAP.md 1.2 / 3.3):
+//! a body may contain numbers, params, `let`/`let*` locals, `+ - * /`,
+//! the numeric builtins (`sqrt expt abs mod floor ceiling round min max`),
+//! `if`/`cond` with comparison/`and`/`or`/`not` conditions, self-recursive
+//! calls, and — inside a `(defrust* ...)` group — calls to the other
+//! functions of the same group (all compiled into one `.so`, so mutual
+//! recursion works without cross-library linking). Still no
+//! lists/strings/closures/global capture: everything is `f64`.
 //!
 //! ABI: every compiled function is exposed as
 //! `extern "C" fn(args: *const f64, len: usize) -> f64` — one fixed shape
@@ -14,6 +17,7 @@
 
 use crate::env::Value;
 use crate::parser::Expr;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -38,28 +42,51 @@ fn sanitize_ident(s: &str) -> String {
     out
 }
 
+/// One function being compiled (alone for `defrust`, together for `defrust*`).
+pub struct FnDef {
+    pub name:   String,
+    pub params: Vec<String>,
+    pub body:   Expr,
+}
+
 struct Ctx {
-    raw_name:     String,   // the Lisp name, for matching self-recursive calls in the AST
     raw_params:   Vec<String>,
-    rust_name:    String,   // sanitized, for emitting Rust source
     rust_params:  Vec<String>,
+    /// Every function of the compilation unit (just one for `defrust`):
+    /// Lisp name → (Rust `_impl` base name, arity). Self-recursion and
+    /// intra-group calls both resolve here.
+    fns:          HashMap<String, (String, usize)>,
+    /// `let`/`let*` bindings in scope, innermost last: Lisp name → Rust name.
+    locals:       Vec<(String, String)>,
+    local_counter: usize,
+}
+
+impl Ctx {
+    fn fresh_local(&mut self, lisp_name: &str) -> String {
+        // Suffix with a counter so distinct Lisp names that sanitize to the
+        // same Rust identifier (and shadowed re-bindings) stay distinct.
+        let rn = format!("{}_l{}", sanitize_ident(lisp_name), self.local_counter);
+        self.local_counter += 1;
+        self.locals.push((lisp_name.to_string(), rn.clone()));
+        rn
+    }
+    fn lookup(&self, name: &str) -> Option<String> {
+        if let Some((_, rn)) = self.locals.iter().rev().find(|(ln, _)| ln == name) {
+            return Some(rn.clone());
+        }
+        self.raw_params.iter().position(|p| p == name).map(|i| self.rust_params[i].clone())
+    }
 }
 
 // ── Codegen: restricted Expr subset → Rust source ────────────────────────
 
-fn codegen_num(expr: &Expr, ctx: &Ctx) -> Result<String, String> {
+fn codegen_num(expr: &Expr, ctx: &mut Ctx) -> Result<String, String> {
     match expr {
         Expr::Number(n) => Ok(format!("({:?}_f64)", n)),
-        Expr::Symbol(s) => {
-            if let Some(i) = ctx.raw_params.iter().position(|p| p == s) {
-                Ok(ctx.rust_params[i].clone())
-            } else {
-                Err(format!(
-                    "defrust: unsupported reference to '{}' — only params, numbers, + - * /, if, \
-                     and self-recursive calls are supported in a defrust body", s
-                ))
-            }
-        }
+        Expr::Symbol(s) => ctx.lookup(s).ok_or_else(|| format!(
+            "defrust: unsupported reference to '{}' — only params, let/let* locals, numbers, \
+             arithmetic and the numeric builtins are available in a defrust body", s
+        )),
         Expr::List(items) if !items.is_empty() => {
             if let Expr::Symbol(head) = &items[0] {
                 match head.as_str() {
@@ -70,38 +97,153 @@ fn codegen_num(expr: &Expr, ctx: &Ctx) -> Result<String, String> {
                         if head == "-" && parts.len() == 1 { return Ok(format!("(-{})", parts[0])); }
                         Ok(format!("({})", parts.join(&format!(" {} ", head))))
                     }
+                    "sqrt" | "abs" | "floor" | "ceiling" | "round" if items.len() == 2 => {
+                        let a = codegen_num(&items[1], ctx)?;
+                        let m = if head == "ceiling" { "ceil" } else { head.as_str() };
+                        Ok(format!("{}.{}()", a, m))
+                    }
+                    "expt" if items.len() == 3 => {
+                        let a = codegen_num(&items[1], ctx)?;
+                        let b = codegen_num(&items[2], ctx)?;
+                        Ok(format!("{}.powf({})", a, b))
+                    }
+                    "mod" if items.len() == 3 => {
+                        // Same as the interpreter's Rust `%` — except a zero
+                        // divisor yields NaN here instead of an error (a
+                        // compiled body has no error channel).
+                        let a = codegen_num(&items[1], ctx)?;
+                        let b = codegen_num(&items[2], ctx)?;
+                        Ok(format!("({} % {})", a, b))
+                    }
+                    "min" | "max" if items.len() == 2 => codegen_num(&items[1], ctx),
+                    "min" | "max" if items.len() >= 3 => {
+                        let mut acc = codegen_num(&items[1], ctx)?;
+                        for e in &items[2..] {
+                            acc = format!("{}.{}({})", acc, head, codegen_num(e, ctx)?);
+                        }
+                        Ok(acc)
+                    }
                     "if" if items.len() == 4 => {
                         let c = codegen_bool(&items[1], ctx)?;
                         let t = codegen_num(&items[2], ctx)?;
                         let e = codegen_num(&items[3], ctx)?;
                         Ok(format!("(if {} {{ {} }} else {{ {} }})", c, t, e))
                     }
-                    s if s == ctx.raw_name => {
-                        if items.len() - 1 != ctx.raw_params.len() {
+                    "cond" if items.len() >= 2 => codegen_cond(&items[1..], ctx),
+                    "let" | "let*" if items.len() == 3 => codegen_let(head == "let*", &items[1], &items[2], ctx),
+                    "let" | "let*" => Err(
+                        "defrust: let/let* takes exactly (let ((name init)...) body) — one body \
+                         expression (the subset is pure, earlier ones would be dead code); \
+                         named let is not supported, use self-recursion".into()
+                    ),
+                    s if ctx.fns.contains_key(s) => {
+                        if ctx.lookup(s).is_some() {
+                            return Err(format!(
+                                "defrust: '{}' is shadowed by a local/param here and cannot be called", s));
+                        }
+                        let (impl_name, arity) = ctx.fns[s].clone();
+                        if items.len() - 1 != arity {
                             return Err(format!(
                                 "defrust: '{}' called with {} arg(s), expected {}",
-                                ctx.raw_name, items.len() - 1, ctx.raw_params.len()
+                                s, items.len() - 1, arity
                             ));
                         }
                         let args = items[1..].iter()
                             .map(|e| codegen_num(e, ctx))
                             .collect::<Result<Vec<_>, _>>()?;
-                        Ok(format!("{}_impl({})", ctx.rust_name, args.join(", ")))
+                        Ok(format!("{}_impl({})", impl_name, args.join(", ")))
                     }
                     other => Err(format!(
-                        "defrust: unsupported call to '{}' — only self-recursion is supported, \
-                         calls to other functions are not (v1 scope, see docs/ROADMAP.md)", other
+                        "defrust: unsupported call to '{}' — only self-recursion, functions in the \
+                         same defrust* group, and the numeric builtins \
+                         (sqrt expt abs mod floor ceiling round min max) are supported", other
                     )),
                 }
             } else {
                 Err("defrust: unsupported expression in body".into())
             }
         }
-        _ => Err("defrust: only numbers, params, + - * /, and if are supported in the body".into()),
+        _ => Err("defrust: only numbers, params, locals, arithmetic, numeric builtins, \
+                  if/cond and let/let* are supported in the body".into()),
     }
 }
 
-fn codegen_bool(expr: &Expr, ctx: &Ctx) -> Result<String, String> {
+fn codegen_let(sequential: bool, bindings: &Expr, body: &Expr, ctx: &mut Ctx) -> Result<String, String> {
+    let Expr::List(bs) = bindings else {
+        return Err("defrust: let bindings must be a list of (name init) pairs".into());
+    };
+    let mut pairs = Vec::with_capacity(bs.len());
+    for b in bs {
+        match b {
+            Expr::List(p) if p.len() == 2 => {
+                if let Expr::Symbol(n) = &p[0] { pairs.push((n.clone(), &p[1])); }
+                else { return Err("defrust: let binding name must be a symbol".into()); }
+            }
+            _ => return Err("defrust: let bindings must be (name init) pairs".into()),
+        }
+    }
+    let saved = ctx.locals.len();
+    let mut code = String::from("{ ");
+    if sequential {
+        for (name, init) in &pairs {
+            let init_code = codegen_num(init, ctx)?; // sees earlier bindings (let*)
+            let rn = ctx.fresh_local(name);
+            code.push_str(&format!("let {} = {}; ", rn, init_code));
+        }
+    } else {
+        // Parallel `let`: all inits evaluate in the outer scope, then bind
+        // together (tuple destructuring), so bindings can't see each other.
+        let inits = pairs.iter()
+            .map(|(_, init)| codegen_num(init, ctx))
+            .collect::<Result<Vec<_>, _>>()?;
+        let names: Vec<String> = pairs.iter().map(|(n, _)| ctx.fresh_local(n)).collect();
+        match names.len() {
+            0 => {}
+            1 => code.push_str(&format!("let {} = {}; ", names[0], inits[0])),
+            _ => code.push_str(&format!("let ({}) = ({}); ", names.join(", "), inits.join(", "))),
+        }
+    }
+    let body_code = codegen_num(body, ctx)?;
+    ctx.locals.truncate(saved);
+    code.push_str(&body_code);
+    code.push_str(" }");
+    Ok(code)
+}
+
+fn codegen_cond(clauses: &[Expr], ctx: &mut Ctx) -> Result<String, String> {
+    let mut arms: Vec<(Option<String>, String)> = Vec::with_capacity(clauses.len());
+    for (i, clause) in clauses.iter().enumerate() {
+        let Expr::List(c) = clause else {
+            return Err("defrust: cond clauses must be (test expr) lists".into());
+        };
+        if c.len() != 2 {
+            return Err("defrust: cond clauses must have exactly one result expression".into());
+        }
+        let is_else = matches!(&c[0], Expr::Symbol(s) if s == "else");
+        if is_else {
+            if i != clauses.len() - 1 { return Err("defrust: cond `else` must be the last clause".into()); }
+            arms.push((None, codegen_num(&c[1], ctx)?));
+        } else {
+            arms.push((Some(codegen_bool(&c[0], ctx)?), codegen_num(&c[1], ctx)?));
+        }
+    }
+    if arms.last().map_or(true, |(c, _)| c.is_some()) {
+        return Err("defrust: cond must end with an `else` clause — a compiled \
+                    function always returns an f64, so every path needs a value".into());
+    }
+    let mut code = String::from("(");
+    for (i, (cond, val)) in arms.iter().enumerate() {
+        match cond {
+            Some(c) if i == 0 => code.push_str(&format!("if {} {{ {} }}", c, val)),
+            Some(c)           => code.push_str(&format!(" else if {} {{ {} }}", c, val)),
+            None              => code.push_str(&format!(" else {{ {} }}", val)),
+        }
+    }
+    code.push(')');
+    Ok(code)
+}
+
+fn codegen_bool(expr: &Expr, ctx: &mut Ctx) -> Result<String, String> {
     if let Expr::List(items) = expr {
         if let Some(Expr::Symbol(head)) = items.first() {
             match head.as_str() {
@@ -130,35 +272,51 @@ fn codegen_bool(expr: &Expr, ctx: &Ctx) -> Result<String, String> {
             }
         }
     }
-    Err("defrust: an `if` condition must be a comparison (< > <= >= =) or and/or/not of comparisons".into())
+    Err("defrust: an `if`/`cond` condition must be a comparison (< > <= >= =) or and/or/not of comparisons".into())
 }
 
-fn generate_source(ctx: &Ctx, body_rust: &str) -> String {
+fn generate_fn_source(def: &FnDef, fns: &HashMap<String, (String, usize)>) -> Result<String, String> {
+    let mut ctx = Ctx {
+        raw_params:    def.params.clone(),
+        rust_params:   def.params.iter().map(|p| sanitize_ident(p)).collect(),
+        fns:           fns.clone(),
+        locals:        Vec::new(),
+        local_counter: 0,
+    };
+    let body_rust = codegen_num(&def.body, &mut ctx)?;
+    let rust_name = &fns[&def.name].0;
     let unpack: String = ctx.rust_params.iter().enumerate()
         .map(|(i, p)| format!("    let {} = unsafe {{ *args.add({}) }};\n", p, i))
         .collect();
     let call_args = ctx.rust_params.join(", ");
     let typed_params = ctx.rust_params.iter().map(|p| format!("{}: f64", p)).collect::<Vec<_>>().join(", ");
-    format!(
+    Ok(format!(
         "#[no_mangle]\npub extern \"C\" fn {name}(args: *const f64, len: usize) -> f64 {{\n\
          \x20   debug_assert_eq!(len, {arity});\n{unpack}\x20   {name}_impl({call_args})\n}}\n\n\
          fn {name}_impl({typed_params}) -> f64 {{\n    {body}\n}}\n",
-        name = ctx.rust_name, arity = ctx.rust_params.len(), unpack = unpack, call_args = call_args,
+        name = rust_name, arity = ctx.rust_params.len(), unpack = unpack, call_args = call_args,
         typed_params = typed_params, body = body_rust,
-    )
+    ))
 }
 
 // ── Compile (rustc, cached by source hash) + dynamically load ───────────
 
-pub fn compile_and_load(name: &str, params: &[String], body: &Expr) -> Result<Value, String> {
-    let ctx = Ctx {
-        raw_name:    name.to_string(),
-        raw_params:  params.to_vec(),
-        rust_name:   sanitize_ident(name),
-        rust_params: params.iter().map(|p| sanitize_ident(p)).collect(),
-    };
-    let body_rust = codegen_num(body, &ctx)?;
-    let source = generate_source(&ctx, &body_rust);
+/// Compile one or more functions into a single `.so` (one function for
+/// `defrust`, a whole group for `defrust*` — that's what makes calls between
+/// them plain Rust calls instead of cross-library linking). Returns one
+/// `Value::Native` per input, in order, all sharing the same loaded Library.
+pub fn compile_and_load_group(defs: &[FnDef]) -> Result<Vec<Value>, String> {
+    if defs.is_empty() { return Err("defrust*: at least one function required".into()); }
+    let mut fns: HashMap<String, (String, usize)> = HashMap::new();
+    for d in defs {
+        if fns.insert(d.name.clone(), (sanitize_ident(&d.name), d.params.len())).is_some() {
+            return Err(format!("defrust*: duplicate function name '{}'", d.name));
+        }
+    }
+    let source = defs.iter()
+        .map(|d| generate_fn_source(d, &fns))
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n");
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
@@ -166,8 +324,9 @@ pub fn compile_and_load(name: &str, params: &[String], body: &Expr) -> Result<Va
 
     let so_ext = if cfg!(target_os = "macos") { "dylib" } else if cfg!(target_os = "windows") { "dll" } else { "so" };
     let dir = cache_dir();
-    let so_path  = dir.join(format!("{}_{:x}.{}", ctx.rust_name, hash, so_ext));
-    let src_path = dir.join(format!("{}_{:x}.rs", ctx.rust_name, hash));
+    let base = sanitize_ident(&defs[0].name);
+    let so_path  = dir.join(format!("{}_{:x}.{}", base, hash, so_ext));
+    let src_path = dir.join(format!("{}_{:x}.rs", base, hash));
 
     if !so_path.exists() {
         std::fs::write(&src_path, &source)
@@ -183,16 +342,23 @@ pub fn compile_and_load(name: &str, params: &[String], body: &Expr) -> Result<Va
         }
     }
 
-    let lib = unsafe { libloading::Library::new(&so_path) }
-        .map_err(|e| format!("defrust: failed to load {}: {}", so_path.display(), e))?;
-    let fn_ptr: *const () = unsafe {
-        let sym: libloading::Symbol<unsafe extern "C" fn(*const f64, usize) -> f64> = lib
-            .get(ctx.rust_name.as_bytes())
-            .map_err(|e| format!("defrust: symbol '{}' not found in compiled library: {}", ctx.rust_name, e))?;
-        *sym as *const ()
-    };
+    let lib = Rc::new(unsafe { libloading::Library::new(&so_path) }
+        .map_err(|e| format!("defrust: failed to load {}: {}", so_path.display(), e))?);
+    defs.iter().map(|d| {
+        let rust_name = &fns[&d.name].0;
+        let fn_ptr: *const () = unsafe {
+            let sym: libloading::Symbol<unsafe extern "C" fn(*const f64, usize) -> f64> = lib
+                .get(rust_name.as_bytes())
+                .map_err(|e| format!("defrust: symbol '{}' not found in compiled library: {}", rust_name, e))?;
+            *sym as *const ()
+        };
+        Ok(Value::Native { name: d.name.clone(), arity: d.params.len(), lib: lib.clone(), fn_ptr })
+    }).collect()
+}
 
-    Ok(Value::Native { name: name.to_string(), arity: params.len(), lib: Rc::new(lib), fn_ptr })
+pub fn compile_and_load(name: &str, params: &[String], body: &Expr) -> Result<Value, String> {
+    let defs = [FnDef { name: name.to_string(), params: params.to_vec(), body: body.clone() }];
+    Ok(compile_and_load_group(&defs)?.pop().unwrap())
 }
 
 /// Call a loaded `defrust` function. `fn_ptr` must have come from

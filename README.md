@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.17.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.18.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -248,13 +248,25 @@ maturin build          # build wheel for distribution
 ### Native Codegen (defrust) & Symbolic Differentiation
 
 ```lisp
-;; Compiles a restricted numeric subset (numbers, params, + - * /, if,
-;; self-recursive calls) to real Rust via rustc, and dynamically loads it.
+;; Compiles a restricted numeric subset to real Rust via rustc and
+;; dynamically loads it: numbers, params, let/let* locals, + - * /,
+;; sqrt expt abs mod floor ceiling round min max, if/cond (comparison
+;; conditions), and self-recursive calls — everything is f64.
 ;; ~1000x faster than the tree-walked equivalent once compiled (measured
 ;; on fib(30): ~8.2s interpreted vs. ~0.007s compiled, cached).
 (defrust fib (n)
   (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
 (fib 30)   ; => 832040, runs as native code
+
+(defrust dist (x1 y1 x2 y2)          ; locals + math builtins
+  (let ((dx (- x2 x1)) (dy (- y2 y1)))
+    (sqrt (+ (* dx dx) (* dy dy)))))
+
+;; defrust* compiles a GROUP into one .so — the functions can call each
+;; other (mutual recursion), which separate defrust invocations cannot.
+(defrust* (F (n) (if (= n 0) 1 (- n (M (F (- n 1))))))   ; Hofstadter
+          (M (n) (if (= n 0) 0 (- n (F (M (- n 1)))))))
+(F 12)   ; => 8, both functions native, calling each other directly
 
 ;; True symbolic differentiation (AST rewriting via calculus rules), not
 ;; numeric approximation — grad returns a new callable derivative function.
@@ -265,7 +277,7 @@ maturin build          # build wheel for distribution
 #### C ABI export — call Rusty-compiled code from anywhere
 
 Every `defrust` function is a plain `extern "C"` symbol in an ordinary shared
-library — there is no bridge to build, because the artifact `rustc` produces is
+library (a `defrust*` group exports every member from its one `.so`) — there is no bridge to build, because the artifact `rustc` produces is
 already callable from C, Python, PyTorch custom ops, or anything else with an
 FFI. Nothing calls back into Rusty; the `.so` is self-contained.
 

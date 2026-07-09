@@ -648,6 +648,34 @@ impl Evaluator {
                                 return Ok(Value::Nil);
                             }
 
+                            // ── defrust*: a group compiled into ONE .so, so
+                            // the functions can call each other (mutual
+                            // recursion) — plain Rust calls, no cross-library
+                            // linking. (defrust* (name (params...) body)...)
+                            "defrust*" => {
+                                let mut defs = Vec::with_capacity(lst.len() - 1);
+                                for d in &lst[1..] {
+                                    let Expr::List(parts) = d else {
+                                        return Err("defrust*: each function must be (name (params...) body)".into());
+                                    };
+                                    if parts.len() != 3 {
+                                        return Err("defrust*: each function must be (name (params...) body)".into());
+                                    }
+                                    let name = sym_name(&parts[0], "defrust*")?;
+                                    let params = match &parts[1] {
+                                        Expr::List(ps) => ps.iter().map(|p| sym_name(p, "defrust* param"))
+                                            .collect::<Result<Vec<_>, _>>()?,
+                                        _ => return Err("defrust*: params must be a list".into()),
+                                    };
+                                    defs.push(crate::rust_jit::FnDef { name, params, body: parts[2].clone() });
+                                }
+                                let natives = crate::rust_jit::compile_and_load_group(&defs)?;
+                                for (d, native) in defs.iter().zip(natives) {
+                                    EnvFrame::set(&env, d.name.clone(), native);
+                                }
+                                return Ok(Value::Nil);
+                            }
+
                             // ── Let forms ─────────────────────────────────
                             "let" => {
                                 // Named let: (let loop ((var val)...) body...)
