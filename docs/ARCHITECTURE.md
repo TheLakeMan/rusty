@@ -229,14 +229,38 @@ The trampoline loop allows unlimited recursion without stack growth.
 
 ---
 
-## Future Improvements
+## Subsystem Map (current, v0.25.0)
 
-- **Phase 1:** Compile-time evaluation, symbolic differentiation, graph IR
-- **Phase 2:** Gradual typing, Lean/Coq integration, formal verification
-- **Phase 3:** JIT compilation, persistent data structures, async evaluator
+Everything the "Future Improvements" list above once promised has since
+shipped (except Lean/Coq integration, deliberately replaced by self-built
+verification — see ROADMAP's Design Constraint). The full system today:
+
+| Subsystem | Where | One line |
+|---|---|---|
+| Evaluator (TCO trampoline) | `src/eval.rs` | every special form; tail calls rebind-and-continue |
+| Environments + frame pool | `src/env.rs`, `src/arena.rs` | FxHash frames, recycled through a thread-local pool |
+| Macros + hygiene | `src/eval.rs` | definition-time renaming of template-bound identifiers |
+| Native codegen | `src/rust_jit.rs` | `defrust`/`defrust*` → rustc → dlopen; fixed C ABI |
+| Graph IR + autodiff + fusion | `src/graph_ir.rs` | hash-consing CSE, fold, DCE; reverse-mode `backward`; `graph-compile`/`graph-compile-grad` kernels |
+| Tensors | `src/env.rs`, `src/interp.rs` | flat row-major f64, Rc-backed |
+| Static checkers | `src/type_check.rs`, `src/effect_check.rs` | conservative: only provable facts are flagged |
+| Exhaustive oracle | `check-exhaustive` (`src/interp.rs`) | verification = ran on every domain point |
+| Tracing | `src/trace.rs` | off-by-default event log; reports are pure data |
+| Checkpoint/restore | `src/checkpoint.rs` | global env as loadable Lisp source |
+| Model persistence | `src/interp.rs` | `save-model`/`load-model`, versioned JSON envelope |
+| Actors | `std.lisp` | deterministic cooperative scheduler, pure Lisp |
+| Proof loop / synthesis / prover | `std.lisp`, `synth.lisp`, `prover.lisp` | 2.1 gates → 4.2 CEGIS sketches → 4.3 tactics |
+| Symbolic regression | `symreg.lisp` | GP over expression data; candidates compiled via `eval` |
+| Control + safety | `robot.lisp` | deterministic loops; inductive safety via the oracle |
+| Agent tools + ReAct | `agent-tools.lisp`, `src/eval.rs` | first-class tools; LLM output gated before running |
+| Python bridge | `src/lib.rs` | PyO3; sessions replay history by design |
+
+Semantics live in [SPEC.md](./SPEC.md); learning path in
+[TUTORIAL.md](./TUTORIAL.md); per-subsystem design notes with measured
+numbers in [ROADMAP.md](./ROADMAP.md)'s per-item annotations.
 
 ---
 
-**Last updated:** July 2026 | [→ Full Roadmap](./ROADMAP.md)
+**Last updated:** July 2026 (v0.25.0) | [→ Full Roadmap](./ROADMAP.md)
 
 ☯

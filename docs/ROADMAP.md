@@ -130,7 +130,7 @@ Everything here was already built self-contained, before "no external runtime de
 ### 5.1 Language Stability
 - [x] **Language specification**: Formal semantics for Rusty Lisp dialect. Done (v0.25.0, docs-only): `docs/SPEC.md` — a precise operational description of the implemented dialect: lexical structure, the value universe, **truthiness (`#f` is the only false value — `()`, `0`, `""` are all true)**, numeric-vs-structural equality, the evaluation model with the exact list of guaranteed tail positions, the full special-form catalog, macro hygiene semantics (definition-time renaming of template-bound identifiers; `,x` untouched), the compiled subsets and their C ABIs, the stable contracts of every capability layer, and a deliberate-non-features list. Every behavioral claim in it was spot-checked against the binary before committing. Honest scope: operational prose, not a mechanized semantics — the eight golden files are the executable conformance suite, stated as such.
 - [x] **Backwards compatibility**: Stable ABI; no breaking changes without major version bump. Done (v0.25.0): SPEC.md §11 is the policy — semver discipline within 0.x (patch = fixes, minor = additive only), an enumerated list of what counts as breaking (evaluation rules, truthiness, equality, special forms, the `defrust` C ABI, checkpoint/save-model formats — all require a major bump + migration note + SPEC update in the same commit), the C ABI frozen as specified, and the golden suite designated as the compatibility suite: any change to expected outputs is by definition observable and must be classified before shipping.
-- [ ] **Comprehensive documentation**: Tutorial, reference, best practices guides
+- [x] **Comprehensive documentation**: Tutorial, reference, best practices guides. Done (v0.25.0, docs-only): `docs/TUTORIAL.md` — zero to verified/compiled/agent-driven programs, every snippet run against the binary before inclusion, closing with a best-practices chapter (the house rules: verify with runs, keep verifiable code pure, integer domains, `eval` vs `eval-string`, total functions in search spaces, durable state in globals, determinism as a feature). Reference = SPEC.md (semantics) + README (catalog) + ARCHITECTURE.md (now with a current subsystem map replacing its stale future-work list).
 - **Deliverable:** v1.0.0 release with semantic versioning
 
 ### 5.2 Ecosystem Maturity
@@ -164,8 +164,8 @@ Everything here was already built self-contained, before "no external runtime de
 This section is now stale relative to actual progress — most of it shipped in Phase 1/2.2 already, and one line below ("integrate with a simple ML framework") is exactly the external-dependency framing the Design Constraint above rules out. Left visible rather than deleted so it's clear what changed and why.
 
 ### Immediate (This Sprint)
-- [ ] Complete ARCHITECTURE.md documenting evaluator and macro system
-- [ ] Write 3 macro examples showing code generation potential
+- [x] Complete ARCHITECTURE.md documenting evaluator and macro system — evaluator/macro sections were already there; completed with a current subsystem map (v0.25.0) covering everything shipped since (graph IR, checkers, tracing, checkpoint, actors, synthesis/prover layers), replacing the stale "Future Improvements" list.
+- [x] Write 3 macro examples showing code generation potential — TUTORIAL.md §3: `defrecord` (constructor + per-field getters from one call), `define-memo` (a define that generates its own cache), `defproperty` (compact syntax → exhaustive-check harness). All three verified running; the third documents the literal-`lambda`-in-template hygiene trap and its house fix.
 - [x] Benchmark current macro performance — `(macro-profile-on)`/`(macro-profile-report)`/`(show-macro-profile)`, Phase 1.1
 - [ ] Set up CI/CD with performance regression detection
 
@@ -173,13 +173,13 @@ This section is now stale relative to actual progress — most of it shipped in 
 - [x] Implement compile-time evaluation (`eval-when`) — Phase 1.1
 - [x] Build first symbolic differentiation macro — `grad`, Phase 1.2
 - [x] Create computation graph IR prototype — `src/graph_ir.rs`, Phase 1.2 (further along than "prototype": has CSE/constant-folding/DCE, not just a data structure)
-- [ ] Publish benchmark comparison vs. PyTorch — the `defrust` fib benchmark exists (Phase 1.2's deliverable note) but isn't published anywhere; a real PyTorch-comparable benchmark still needs Graph IR wired into `defrust` (Phase 3.3)
+- [x] Publish benchmark comparison vs. PyTorch — published in-repo: README's Tensor Autodiff section (bit-for-bit gradient parity; 11.8×/1.4× training-loop numbers, fused-kernel update in v0.20.0) and ROADMAP 3.1/3.3 notes carry the full methodology; `benchmarks/` holds the reproducible agent and symreg/gplearn comparisons. Graph IR → defrust codegen (the blocker this item named) shipped in 3.3.
 
 ### Sprint 3 (Month 3)
 - [x] Finalize graph optimization passes — Phase 1.2
 - [x] Begin neuro-symbolic bridge library design — Phase 1.3 (`defun-constrained`/`logic-loss`)
-- [ ] ~~Integrate with simple ML framework~~ — superseded by Phase 3.1's native tensor type; no ML framework dependency, per the Design Constraint above
-- [ ] Write user-facing tutorial
+- [x] ~~Integrate with simple ML framework~~ — superseded by Phase 3.1's native tensor type; no ML framework dependency, per the Design Constraint above (closed as superseded, nothing to build).
+- [x] Write user-facing tutorial — `docs/TUTORIAL.md` (see 5.1).
 
 ---
 
