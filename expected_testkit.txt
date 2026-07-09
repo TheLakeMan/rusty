@@ -1,0 +1,12 @@
+(test arithmetic pass)
+(test lists-and-truth pass)
+(test raising pass)
+(test deliberately-failing FAIL assert-eq: expected 5, got 4)
+(test deliberately-erroring FAIL Undefined: 'undefined-function')
+(tests passed 3 failed 2)
+(suite-green #f)
+(test only-good pass)
+(tests passed 1 failed 0)
+(clean-suite #t)
+(bench-median-sane #t)
+TESTKIT TESTS DONE
