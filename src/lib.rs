@@ -23,6 +23,7 @@ mod arena;
 mod rust_jit;
 mod graph_ir;
 mod checkpoint;
+mod trace;
 mod type_check;
 mod effect_check;
 

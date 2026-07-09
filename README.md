@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.15.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.16.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -377,6 +377,24 @@ total                 ; => 25
 Cooperative and single-threaded by design (Rusty's runtime is `Rc`-based):
 concurrency means deterministic interleaved message handling, not threads.
 An LLM-backed agent is just a handler that calls `llm`.
+
+### Execution Tracing
+
+```lisp
+;; Off-by-default event log around tool/LLM/shell/agent execution —
+;; Rusty's own trace format, no OTel collector required.
+(trace-on)
+(tool-call "greet" "world")
+(shell "echo hi")
+(run-agents)                 ; actor scheduler logs send / agent-handle events
+(trace-event 'my-kind 'my-name "custom data")   ; your own events
+(trace-report)
+; => ((0 12 tool-call greet 184 ()) (1 903 shell shell 2100 "echo hi")
+;     (2 3100 send sq () ()) (3 3140 agent-handle sq () ()) ...)
+;    rows: (seq t-micros kind name dur-micros data) — pure data, so
+;    (save-model "trace.json" (trace-report)) just works.
+(trace-off)
+```
 
 ### Checkpoint / Restore
 

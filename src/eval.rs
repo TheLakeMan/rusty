@@ -157,8 +157,13 @@ impl Evaluator {
                                     }
                                 } else { None };
 
+                                let t0 = crate::trace::start();
                                 let result = Self::llm_runtime()
                                     .block_on(Self::call_llm(&prompt, temp, max_t));
+                                if let Ok(ref r) = result {
+                                    crate::trace::record_since("llm", "llm", t0,
+                                        Some(format!("prompt-chars={} response-chars={}", prompt.len(), r.len())));
+                                }
 
                                 return result.map(Value::String);
                             }
@@ -204,9 +209,12 @@ impl Evaluator {
                                         for (p, a) in params.iter().zip(args.iter()) {
                                             EnvFrame::set(&child, p.clone(), a.clone());
                                         }
+                                        let t0 = crate::trace::start();
                                         let last = body.len() - 1;
                                         for e in &body[..last] { self.eval(e, &child)?; }
-                                        return self.eval(&body[last], &child);
+                                        let result = self.eval(&body[last], &child);
+                                        crate::trace::record_since("tool-call", &name, t0, None);
+                                        return result;
                                     }
                                     Some(Value::Builtin(_, f)) => return f(&args),
                                     Some(Value::Lambda { params, rest, body, env: lenv }) => {
@@ -294,6 +302,7 @@ impl Evaluator {
                                     let prompt = format!("{}\nStep {}:", history, step + 1);
                                     let full_prompt = format!("{}\n\n{}", system, prompt);
 
+                                    let t0 = crate::trace::start();
                                     let response = Self::llm_runtime()
                                         .block_on(Self::call_llm(&full_prompt, 0.3, Some(200)));
 
@@ -301,10 +310,14 @@ impl Evaluator {
                                         Ok(r) => r,
                                         Err(e) => return Err(format!("react-loop: LLM error: {}", e)),
                                     };
+                                    crate::trace::record_since("llm", "react-llm", t0,
+                                        Some(format!("prompt-chars={} response-chars={}", full_prompt.len(), response.len())));
 
                                     // Parse ACTION / FINAL from response
                                     if response.contains("FINAL:") {
                                         if let Some(ans) = response.split("FINAL:").nth(1) {
+                                            crate::trace::record("react-step", "final", None,
+                                                Some(format!("step={}", step + 1)));
                                             last_result = Value::String(ans.trim().to_string());
                                             break;
                                         }
@@ -315,6 +328,7 @@ impl Evaluator {
                                             .unwrap_or("").lines().next().unwrap_or("").trim();
 
                                         // Try to call the tool
+                                        let t0 = crate::trace::start();
                                         let obs = match EnvFrame::get(&env, action) {
                                             Some(Value::Tool { params, body, env: tenv, .. }) => {
                                                 let child = EnvFrame::new(Some(tenv.clone()));
@@ -331,6 +345,8 @@ impl Evaluator {
                                             }
                                             _ => format!("Unknown tool: {}", action),
                                         };
+                                        crate::trace::record_since("react-step", action, t0,
+                                            Some(format!("step={} input-chars={}", step + 1, input.len())));
 
                                         history.push_str(&format!(
                                             "\nStep {}: ACTION={} INPUT={}\nOBSERVATION: {}\n",
@@ -704,6 +720,10 @@ impl Evaluator {
                             if args.len() != params.len() {
                                 return Err(format!("{}: expected {} arg(s), got {}", name, params.len(), args.len()));
                             }
+                            // Entry-only trace event: this path is a TCO
+                            // `continue`, so the call's end isn't observable
+                            // here without breaking tail calls.
+                            crate::trace::record("tool-enter", &name, None, None);
                             let child = EnvFrame::extend(&tenv, &params, &None, args)?;
                             let last = body.len() - 1;
                             for e in &body[..last] { self.eval(e, &child)?; }

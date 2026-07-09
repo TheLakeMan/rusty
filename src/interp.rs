@@ -95,11 +95,14 @@ pub fn apply_value(f: &Value, args: &[Value], eval: &Evaluator) -> Result<Value,
             for e in &body[..last] { eval.eval(e, &child)?; }
             eval.eval(&body[last], &child)
         }
-        Value::Tool { params, body, env, .. } => {
+        Value::Tool { name, params, body, env, .. } => {
+            let t0 = crate::trace::start();
             let child = EnvFrame::extend(env, params, &None, args.to_vec())?;
             let last  = body.len() - 1;
             for e in &body[..last] { eval.eval(e, &child)?; }
-            eval.eval(&body[last], &child)
+            let result = eval.eval(&body[last], &child);
+            crate::trace::record_since("tool-call", name, t0, None);
+            result
         }
         _ => Err(format!("Not callable: {}", f)),
     }
@@ -898,6 +901,31 @@ pub fn setup_builtins(env: &Env) {
         }).collect()))
     });
 
+    // ── Execution tracing (Phase 3.2) ─────────────────────────────────────
+    b!("trace-on", |_| { crate::trace::clear(); crate::trace::set_enabled(true); Ok(Value::Nil) });
+    b!("trace-off", |_| { crate::trace::set_enabled(false); Ok(Value::Nil) });
+    b!("trace-clear", |_| { crate::trace::clear(); Ok(Value::Nil) });
+    b!("trace-report", |_| Ok(crate::trace::report()));
+    b!("trace-dropped", |_| Ok(Value::Number(crate::trace::dropped() as f64)));
+    // (trace-event kind name [data]) — record a custom event from Lisp.
+    // Cheap no-op when tracing is off, so library code (e.g. the actor
+    // scheduler in std.lisp) can call it unconditionally.
+    b!("trace-event", |args| {
+        let sym = |v: &Value| match v {
+            Value::Symbol(s) | Value::String(s) => Ok(s.clone()),
+            other => Err(format!("trace-event: expected symbol or string, got {}", other)),
+        };
+        match args {
+            [kind, name] => { crate::trace::record_dyn(sym(kind)?, sym(name)?, None); Ok(Value::Nil) }
+            [kind, name, data] => {
+                let d = match data { Value::String(s) => s.clone(), other => format!("{}", other) };
+                crate::trace::record_dyn(sym(kind)?, sym(name)?, Some(d));
+                Ok(Value::Nil)
+            }
+            _ => Err("trace-event: (trace-event kind name [data])".into()),
+        }
+    });
+
     // ── Macro profiler ───────────────────────────────────────────────────
     b!("macro-profile-on", |_| { crate::eval::macro_profile::set_enabled(true); Ok(Value::Nil) });
     b!("macro-profile-off", |_| { crate::eval::macro_profile::set_enabled(false); Ok(Value::Nil) });
@@ -995,11 +1023,13 @@ pub fn setup_builtins(env: &Env) {
             Value::String(s) => s.clone(),
             other => format!("{}", other),
         };
+        let t0 = crate::trace::start();
         let output = std::process::Command::new("sh")
             .arg("-c")
             .arg(&cmd)
             .output()
             .map_err(|e| format!("shell: {}", e))?;
+        crate::trace::record_since("shell", "shell", t0, Some(cmd.clone()));
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         if !output.status.success() && !stderr.is_empty() {

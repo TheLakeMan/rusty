@@ -552,7 +552,9 @@
 (define (send! to msg)
   (let ((e (assoc to *mailboxes*)))
     (if e
-        (begin (mailbox-set! to (append (cadr e) (list msg))) 'sent)
+        (begin (trace-event 'send to)             ; no-op unless (trace-on)
+               (mailbox-set! to (append (cadr e) (list msg)))
+               'sent)
         (list 'error 'no-such-agent to))))
 
 ;; Process exactly one pending message (first spawned agent with a non-empty
@@ -567,6 +569,7 @@
           (if (null? q)
               (scan (cdr as))
               (begin
+                (trace-event 'agent-handle name)  ; no-op unless (trace-on)
                 (mailbox-set! name (cdr q))   ; dequeue BEFORE handling, so a
                 (handler (car q))             ; handler send!-ing to itself works
                 #t))))))
