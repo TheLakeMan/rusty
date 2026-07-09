@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.14.1 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.15.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -377,6 +377,25 @@ total                 ; => 25
 Cooperative and single-threaded by design (Rusty's runtime is `Rc`-based):
 concurrency means deterministic interleaved message handling, not threads.
 An LLM-backed agent is just a handler that calls `llm`.
+
+### Checkpoint / Restore
+
+```lisp
+;; Snapshot the global environment as plain, human-readable Lisp source —
+;; data as literals, functions/macros/tools as their defining forms,
+;; actor mailboxes and handlers included. Restore is just load.
+(checkpoint "state.lisp")   ; => "state.lisp"
+(load "state.lisp")         ; in a fresh process: picks up where you left off
+
+;; An interrupted actor run resumes exactly: checkpoint mid-flight with
+;; messages queued, restore elsewhere, (run-agents) finishes with the same
+;; answer the uninterrupted run produces.
+```
+
+Closures re-close over the restored global environment — top-level
+definitions round-trip faithfully; keep durable actor state in globals via
+`set!`. `defrust` natives are compiled code and are listed in the
+checkpoint header as needing their `defrust` re-run.
 
 ### Error Handling
 

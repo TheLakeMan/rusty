@@ -363,6 +363,21 @@ impl Evaluator {
                                 return self.eval_all(&ast, &env);
                             }
 
+                            // ── (checkpoint "file.lisp") ────────────────
+                            // Snapshot the global env as plain Lisp source;
+                            // restore is just (load "file.lisp"). See
+                            // checkpoint.rs for what gets serialized.
+                            "checkpoint" => {
+                                if lst.len() != 2 {
+                                    return Err("checkpoint: (checkpoint \"file.lisp\")".into());
+                                }
+                                let path = match self.eval(&lst[1], &env)? {
+                                    Value::String(s) => s,
+                                    _ => return Err("checkpoint: filename must be a string".into()),
+                                };
+                                return crate::checkpoint::write_checkpoint(&path, &env);
+                            }
+
                             // ── (try-catch body (err) handler) ──────────
                             "try-catch" => {
                                 if lst.len() < 4 {

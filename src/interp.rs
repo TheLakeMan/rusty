@@ -145,7 +145,7 @@ fn nested_to_tensor(v: &Value) -> Result<(Vec<f64>, Vec<usize>), String> {
     }
 }
 
-fn tensor_to_nested(data: &[f64], shape: &[usize]) -> Value {
+pub fn tensor_to_nested(data: &[f64], shape: &[usize]) -> Value {
     if shape.is_empty() { return Value::Number(data[0]); }
     if shape.len() == 1 { return list(data.iter().map(|n| Value::Number(*n)).collect()); }
     let chunk = data.len() / shape[0];
