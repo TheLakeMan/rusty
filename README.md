@@ -18,6 +18,12 @@ Rusty is the language you reach for when you need **computation that reasons abo
 
 ---
 
+## ☯ Built with Rusty
+
+**[wuwei](https://github.com/TheLakeMan/wuwei)** — a provably-gated agent runner: LLM agents that *can't act until the action is proven safe*. Every tool call is contract-checked before it runs, and every tool is statically verified honest about its effects — all built on Rusty's `certify-tool-chain` / `check-effects` / `safe-call`, with zero new interpreter code. The flagship demonstration of Rusty's verifiable-agent thesis.
+
+---
+
 ## Quick Start
 
 ```bash
