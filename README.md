@@ -30,6 +30,9 @@ cargo run
 # Run a Lisp file
 cargo run -- path/to/script.lisp
 
+# Install `rusty` onto your PATH (used by apps built on Rusty, e.g. wuwei)
+cargo install --path . --bin rusty --root ~/.local
+
 # Python bridge
 maturin develop
 python3 -c "import rusty; print(rusty.eval('(+ 1 2)'))"
