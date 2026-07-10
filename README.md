@@ -296,8 +296,8 @@ FFI. Nothing calls back into Rusty; the `.so` is self-contained.
 
 ```python
 # verified end-to-end: no Rusty process involved
-import ctypes
-lib = ctypes.CDLL("/home/you/.rusty/jit-cache/rusty_fib_native_<hash>.so")
+import ctypes, os
+lib = ctypes.CDLL(os.path.expanduser("~/.rusty/jit-cache/rusty_fib_native_<hash>.so"))
 f = lib.rusty_fib_native
 f.restype  = ctypes.c_double
 f.argtypes = [ctypes.POINTER(ctypes.c_double), ctypes.c_size_t]
