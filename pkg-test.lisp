@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; pkg-test.lisp — golden test for pkg.lisp. No network: the fixture
 ;; packages are local git repositories under /tmp, installed via file://
 ;; URLs. Deterministic (fixed paths, no timestamps/hashes in output).

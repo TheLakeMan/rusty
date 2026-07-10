@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 /// Frame variable map. FxHash instead of the std default: SipHash's
 /// DoS-resistance buys nothing for interpreter-internal short var names
 /// and costs real time on every lookup/insert (Phase 3.3).

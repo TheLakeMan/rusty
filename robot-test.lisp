@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; robot-test.lisp — golden test for robot.lisp (Phase 4.4).
 ;; A 1-D corridor robot: position 0..20 (walls outside), velocity -2..2,
 ;; action = acceleration in {-1,0,1}. Everything integer → exact, and the

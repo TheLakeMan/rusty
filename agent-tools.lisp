@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;;; agent-tools.lisp — the agent tool library (filesystem/shell/LLM tools
 ;;; + the ReAct entry point). Loaded automatically by std.lisp at startup.
 ;;; Registration is silent — call (agent-help) for the tool reference.

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! rusty-lsp — a minimal Language Server for Rusty (Phase 5.2).
 //!
 //! JSON-RPC over stdio, hand-framed (Content-Length headers) — no LSP

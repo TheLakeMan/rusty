@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; perf_gate.lisp — CI performance-regression gate (sprint item).
 ;;
 ;; Ratios, not absolutes: shared CI runners have noisy, heterogeneous

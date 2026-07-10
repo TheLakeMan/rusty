@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; kg-test.lisp — golden test for the knowledge graph (src/kg.rs + kg.lisp).
 ;; Deterministic: insertion-ordered store, fixed data, tmp-file round-trip.
 

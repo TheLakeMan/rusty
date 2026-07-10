@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! trace.rs — Rusty's own lightweight execution-trace format (Phase 3.2).
 //!
 //! Same philosophy as `eval::macro_profile`, generalized: a thread-local,

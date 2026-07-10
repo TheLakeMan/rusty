@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; kg.lisp — inference rules over the native knowledge graph (Phase 1.3).
 ;; The store/query/N-Triples core is Rust (src/kg.rs, kg-* builtins);
 ;; this layer adds forward-chaining rules in pure Lisp, same library

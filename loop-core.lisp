@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; loop-core.lisp — Loop Interview Engine v0.2.1
 ;; ─────────────────────────────────────────────────────────────────────────────

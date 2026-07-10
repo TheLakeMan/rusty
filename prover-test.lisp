@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; prover-test.lisp — golden test for prover.lisp (bounded proof assistant).
 ;; Deterministic: no randomness, no LLM.
 

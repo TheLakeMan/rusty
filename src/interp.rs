@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! interp.rs — shared interpreter core used by both main.rs (REPL/CLI)
 //! and lib.rs (PyO3 Python bridge).
 

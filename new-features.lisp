@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ; New features tests for SimpleLisp v2.2
 
 (def assert-equal (expected actual label)

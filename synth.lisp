@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; synth.lisp — sketch-based program synthesis, CEGIS-style (Phase 4.2).
 ;;
 ;; A SKETCH is a quoted program containing holes — (?? id) markers.

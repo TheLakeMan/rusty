@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; pkg.lisp — a registry-less package manager (Phase 5.2, pure Lisp).
 ;;
 ;; A PACKAGE is any git repository with a `package.lisp` manifest at its

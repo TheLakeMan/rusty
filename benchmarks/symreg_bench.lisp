@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; symreg_bench.lisp — Rusty side of the 4.1 deliverable benchmark.
 ;; 3 problems × 10 seeds, pop 120 × max 60 generations (symreg defaults).
 ;; Success = training MSE < 1e-10. Mirrored by symreg_gplearn_bench.py.

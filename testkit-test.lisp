@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; testkit-test.lisp — golden test for testkit.lisp. Deterministic:
 ;; benchmark timings are asserted sane, never printed.
 

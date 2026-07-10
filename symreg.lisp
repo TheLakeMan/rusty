@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; symreg.lisp — symbolic regression by genetic programming (Phase 4.1).
 ;;
 ;; Find a human-readable equation fitting data, as a pure-Lisp library:

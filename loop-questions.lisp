@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; loop-questions.lisp — The Loop Question Bank
 ;;

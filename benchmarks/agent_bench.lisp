@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; agent_bench.lisp — Phase 3.3 deliverable benchmark.
 ;;
 ;; Three agent workloads, all deterministic (no LLM):

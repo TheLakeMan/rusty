@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! type_check.rs — flow-sensitive static type checking (ROADMAP.md 2.2).
 //!
 //! `check-types` (interp.rs builtin) walks a lambda's body *without

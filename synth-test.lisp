@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; synth-test.lisp — golden test for synth.lisp (sketch-based synthesis).
 ;; Deterministic: enumeration order is fixed, no randomness, no LLM.
 

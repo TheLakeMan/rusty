@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;;; std.lisp — Rusty Standard Library v1.1
 ;;; Auto-loaded on startup.
 

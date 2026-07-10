@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;tests.lisp
 ; Regression tests for SimpleLisp.
 ; If a test fails, it intentionally raises: Division by zero.

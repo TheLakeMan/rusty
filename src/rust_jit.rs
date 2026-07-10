@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! rust_jit.rs — `defrust` / `defrust*`: compile a restricted numeric Lisp
 //! subset to real Rust, via `rustc` + dynamic loading.
 //!

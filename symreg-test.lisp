@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; symreg-test.lisp — golden test for symreg.lisp (equation discovery).
 ;; Deterministic (seeded PRNG): same discovered equations every run.
 

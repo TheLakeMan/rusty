@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! graph_ir.rs — a computation-graph IR (inspired by XLA/TVM) over the same
 //! restricted numeric subset `defrust` compiles (numbers, params, + - * /,
 //! comparisons, if) plus the Phase-3.1 tensor ops (tensor-add/sub/mul/div,

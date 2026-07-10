@@ -733,6 +733,16 @@ See [ROADMAP.md](./ROADMAP.md) for planned features and [ARCHITECTURE.md](./ARCH
 
 ## License
 
-MIT
+Copyright (c) 2026 Nicholas Vermeulen.
+
+Rusty is free software licensed under the **GNU Affero General Public License,
+version 3 or later** (AGPL-3.0-or-later) — see [LICENSE](./LICENSE). In short:
+you may use, study, modify, and redistribute it, but any modified version you
+run to provide a network service must make its complete source available to
+that service's users.
+
+**Commercial licensing** — if the AGPL's terms don't fit your use (for example,
+embedding Rusty in a closed-source product or network service), a commercial
+license is available on inquiry. Contact Nicholas Vermeulen to discuss terms.
 
 ☯ *In memory of my brother.*

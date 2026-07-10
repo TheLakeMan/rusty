@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! effect_check.rs — effect tracking (ROADMAP.md 2.2, "ensure pure
 //! functions remain pure"). `check-effects` walks a lambda's body *without
 //! executing it* and reports any operation it can prove is effectful, from

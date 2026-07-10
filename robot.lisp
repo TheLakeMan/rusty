@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; robot.lisp — deterministic control loops + safety verification
 ;; (Phase 4.4). Pure Lisp, zero dependencies, same library pattern as
 ;; the actor/synth/prover layers.

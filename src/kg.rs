@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! kg.rs — a self-contained knowledge graph (ROADMAP 1.3, resolved the
 //! house way: RDF is a *format*, not a database, so Rusty gets a native
 //! triple store with N-Triples import/export instead of a binding to

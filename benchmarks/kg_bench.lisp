@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; kg_bench.lisp — Rusty side of the knowledge-graph benchmark.
 ;; Synthetic 3-generation family data, mirrored by kg_rdflib_bench.py:
 ;; load N-Triples, run the grandparent join, count solutions, time both.

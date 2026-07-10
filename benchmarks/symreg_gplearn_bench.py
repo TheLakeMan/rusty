@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Nicholas Vermeulen
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # symreg_gplearn_bench.py — gplearn side of the 4.1 deliverable benchmark.
 # Same 3 problems, same budget (pop 120 x max 60 generations), same
 # function set (+ - * protected-div), 10 seeds, single thread.

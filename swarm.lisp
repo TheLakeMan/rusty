@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; swarm.lisp — Phase 3.2 deliverable: a multi-agent system where agents
 ;; coordinate SYMBOLIC REASONING through message passing alone.
 ;;

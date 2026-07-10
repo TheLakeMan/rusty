@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; prover.lisp — a proof assistant for the invariants Rusty can express
 ;; (Phase 4.3). LCF-style: PROPOSITIONS are data, TACTICS are functions
 ;; that restructure goals, and the discharge oracle is 2.1's

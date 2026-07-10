@@ -1,3 +1,6 @@
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+
 ;; testkit.lisp — testing & benchmarking utilities (Phase 5.2).
 ;;
 ;;   (deftest name body...)      register a test (order preserved)

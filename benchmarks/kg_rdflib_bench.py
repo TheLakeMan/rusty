@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Nicholas Vermeulen
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # kg_rdflib_bench.py — rdflib side of the knowledge-graph benchmark.
 # Generates /tmp/rusty-kg-bench.nt (both sides load the identical file),
 # then times: load, grandparent join (SPARQL), type+age join.

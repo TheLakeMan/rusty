@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Nicholas Vermeulen
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # lsp-test.py — scripted stdio session against rusty-lsp (Phase 5.2).
 # Checks: init handshake, diagnostics with exact positions, completion
 # harvested from a real interpreter env, hover for globals and special

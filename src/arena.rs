@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Nicholas Vermeulen
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! arena.rs — memory pooling for the evaluator (Phase 3.3, activated).
 //!
 //! This file used to hold a dormant mark/sweep arena sketch. That design
