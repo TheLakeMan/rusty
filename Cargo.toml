@@ -3,6 +3,7 @@ name = "rusty"
 version = "0.29.0"
 edition = "2021"
 description = "A modern Lisp interpreter in Rust with TCO, macros, and AI agent capabilities"
+default-run = "rusty"   # `cargo run` starts the REPL (not rusty-lsp)
 
 [[bin]]
 name = "rusty"
