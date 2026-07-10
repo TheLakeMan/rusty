@@ -138,15 +138,20 @@ The ReAct loop:
 (llm "Summarize this" 0.3 500)
 ```
 
-Start a compatible server:
-```bash
-# With llama.cpp
-llama-server -m /path/to/model.gguf --port 8080
+Rusty talks to any OpenAI-compatible `/v1/chat/completions` endpoint. The
+simplest is [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`:
 
-# With Hyperion
-~/hyperion/build/model_server /path/to/model.gguf
-# then wrap with an OpenAI-compatible proxy
+```bash
+# Build llama.cpp (once)
+git clone https://github.com/ggml-org/llama.cpp && cd llama.cpp
+cmake -B build && cmake --build build --config Release -j
+
+# Serve any GGUF model on localhost:8080 (grab one from Hugging Face)
+./build/bin/llama-server -m /path/to/model.gguf --port 8080
 ```
+
+Override the defaults with env vars if needed: `RUSTY_LLM_URL`, `RUSTY_MODEL`,
+`RUSTY_LLM_TIMEOUT_SECS` (default 120 — raise it for slow reasoning models).
 
 ---
 
