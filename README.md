@@ -22,6 +22,8 @@ Rusty is the language you reach for when you need **computation that reasons abo
 
 **[wuwei](https://github.com/TheLakeMan/wuwei)** — a provably-gated agent runner: LLM agents that *can't act until the action is proven safe*. Every tool call is contract-checked before it runs, and every tool is statically verified honest about its effects — all built on Rusty's `certify-tool-chain` / `check-effects` / `safe-call`, with zero new interpreter code. The flagship demonstration of Rusty's verifiable-agent thesis.
 
+**[shouzhong](https://github.com/TheLakeMan/shouzhong)** — provably-safe control loops: controllers proven safe over *every* state by `check-exhaustive` (down to a 3-D drone geofence with wind gusts quantified inside the proof domain — 120,351 states), actuators contract-gated per command, and LLM planners that can re-aim the plant but can never leave the fence. Proofs transfer to the `defrust`-compiled control law by exhaustive equality: prove it slow, run it fast. Zero new interpreter code.
+
 ---
 
 ## Quick Start
