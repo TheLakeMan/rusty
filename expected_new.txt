@@ -7,6 +7,22 @@ reverse
 nth
 member
 Macro support loaded
+sin
+cos
+tan
+atan
+atan2
+exp
+log
+log/exp inverse
+atan2 = atan on x=1
+sin 1
+grad sin
+grad cos
+grad tan
+grad atan
+grad exp
+grad log
 number?
 list?
 procedure?

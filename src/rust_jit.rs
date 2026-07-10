@@ -6,7 +6,8 @@
 //!
 //! Scope (deliberately numeric-only — see docs/ROADMAP.md 1.2 / 3.3):
 //! a body may contain numbers, params, `let`/`let*` locals, `+ - * /`,
-//! the numeric builtins (`sqrt expt abs mod floor ceiling round min max`),
+//! the numeric builtins (`sqrt expt abs mod floor ceiling round min max
+//! sin cos tan atan atan2 exp log` — `log` is natural log, Rust's `ln`),
 //! `if`/`cond` with comparison/`and`/`or`/`not` conditions, self-recursive
 //! calls, and — inside a `(defrust* ...)` group — calls to the other
 //! functions of the same group (all compiled into one `.so`, so mutual
@@ -100,15 +101,21 @@ fn codegen_num(expr: &Expr, ctx: &mut Ctx) -> Result<String, String> {
                         if head == "-" && parts.len() == 1 { return Ok(format!("(-{})", parts[0])); }
                         Ok(format!("({})", parts.join(&format!(" {} ", head))))
                     }
-                    "sqrt" | "abs" | "floor" | "ceiling" | "round" if items.len() == 2 => {
+                    "sqrt" | "abs" | "floor" | "ceiling" | "round"
+                    | "sin" | "cos" | "tan" | "atan" | "exp" | "log" if items.len() == 2 => {
                         let a = codegen_num(&items[1], ctx)?;
-                        let m = if head == "ceiling" { "ceil" } else { head.as_str() };
+                        let m = match head.as_str() { "ceiling" => "ceil", "log" => "ln", h => h };
                         Ok(format!("{}.{}()", a, m))
                     }
                     "expt" if items.len() == 3 => {
                         let a = codegen_num(&items[1], ctx)?;
                         let b = codegen_num(&items[2], ctx)?;
                         Ok(format!("{}.powf({})", a, b))
+                    }
+                    "atan2" if items.len() == 3 => {
+                        let a = codegen_num(&items[1], ctx)?;
+                        let b = codegen_num(&items[2], ctx)?;
+                        Ok(format!("{}.atan2({})", a, b))
                     }
                     "mod" if items.len() == 3 => {
                         // Same as the interpreter's Rust `%` — except a zero
@@ -159,7 +166,8 @@ fn codegen_num(expr: &Expr, ctx: &mut Ctx) -> Result<String, String> {
                     other => Err(format!(
                         "defrust: unsupported call to '{}' — only self-recursion, functions in the \
                          same defrust* group, and the numeric builtins \
-                         (sqrt expt abs mod floor ceiling round min max) are supported", other
+                         (sqrt expt abs mod floor ceiling round min max sin cos tan atan atan2 exp log) \
+                         are supported", other
                     )),
                 }
             } else {

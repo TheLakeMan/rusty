@@ -1130,6 +1130,39 @@ pub fn symbolic_derivative(expr: &Expr, var: &str) -> Result<Expr, String> {
                     let denom = list2("*", Expr::Number(2.0), crate::parser::elist(vec![Expr::Symbol("sqrt".into()), args[0].clone()]));
                     Ok(list2("/", da, denom))
                 }
+                "sin" if args.len() == 1 => {
+                    // cos(a) * a'
+                    let da = symbolic_derivative(&args[0], var)?;
+                    Ok(list2("*", crate::parser::elist(vec![Expr::Symbol("cos".into()), args[0].clone()]), da))
+                }
+                "cos" if args.len() == 1 => {
+                    // -(sin(a) * a')
+                    let da = symbolic_derivative(&args[0], var)?;
+                    let inner = list2("*", crate::parser::elist(vec![Expr::Symbol("sin".into()), args[0].clone()]), da);
+                    Ok(crate::parser::elist(vec![Expr::Symbol("-".into()), inner]))
+                }
+                "tan" if args.len() == 1 => {
+                    // a' / cos(a)^2
+                    let da = symbolic_derivative(&args[0], var)?;
+                    let cos_a = crate::parser::elist(vec![Expr::Symbol("cos".into()), args[0].clone()]);
+                    Ok(list2("/", da, list2("*", cos_a.clone(), cos_a)))
+                }
+                "atan" if args.len() == 1 => {
+                    // a' / (1 + a^2)
+                    let da = symbolic_derivative(&args[0], var)?;
+                    let denom = list2("+", Expr::Number(1.0), list2("*", args[0].clone(), args[0].clone()));
+                    Ok(list2("/", da, denom))
+                }
+                "exp" if args.len() == 1 => {
+                    // exp(a) * a'
+                    let da = symbolic_derivative(&args[0], var)?;
+                    Ok(list2("*", crate::parser::elist(vec![Expr::Symbol("exp".into()), args[0].clone()]), da))
+                }
+                "log" if args.len() == 1 => {
+                    // a' / a
+                    let da = symbolic_derivative(&args[0], var)?;
+                    Ok(list2("/", da, args[0].clone()))
+                }
                 "if" if args.len() == 3 => {
                     let dthen = symbolic_derivative(&args[1], var)?;
                     let delse = symbolic_derivative(&args[2], var)?;

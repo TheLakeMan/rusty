@@ -53,6 +53,29 @@
     (print "Macro support loaded")
     "macro-ok"))
 
+; Math builtins (trig/exp/log) and their grad rules
+(def close? (a b) (lt (abs (sub a b)) 1e-12))
+
+(def test-math ()
+  (begin
+    (assert-equal 0 (sin 0) "sin")
+    (assert-equal 1 (cos 0) "cos")
+    (assert-equal 0 (tan 0) "tan")
+    (assert-equal 0 (atan 0) "atan")
+    (assert-equal 0 (atan2 0 1) "atan2")
+    (assert-equal 1 (exp 0) "exp")
+    (assert-equal 0 (log 1) "log")
+    (assert-true (close? (log (exp 5)) 5) "log/exp inverse")
+    (assert-true (close? (atan2 1 1) (atan 1)) "atan2 = atan on x=1")
+    (assert-true (close? (sin 1) 0.8414709848078965) "sin 1")
+    (assert-true (close? ((grad (lambda (x) (sin x))) 0) 1) "grad sin")
+    (assert-true (close? ((grad (lambda (x) (cos x))) 0) 0) "grad cos")
+    (assert-true (close? ((grad (lambda (x) (tan x))) 0) 1) "grad tan")
+    (assert-true (close? ((grad (lambda (x) (atan x))) 1) 0.5) "grad atan")
+    (assert-true (close? ((grad (lambda (x) (exp x))) 0) 1) "grad exp")
+    (assert-true (close? ((grad (lambda (x) (log x))) 2) 0.5) "grad log")
+    "math-ok"))
+
 ; Types
 (def test-types ()
   (begin
@@ -68,6 +91,7 @@
     (test-cond)
     (test-lists-extra)
     (test-macro)
+    (test-math)
     (test-types)
     (print "NEW FEATURES PASSED")))
 

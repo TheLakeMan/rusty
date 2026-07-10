@@ -252,6 +252,15 @@ pub fn setup_builtins(env: &Env) {
     b!("floor",   |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.floor()))}else{Err("floor: not a number".into())} });
     b!("ceiling", |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.ceil()))}else{Err("ceiling: not a number".into())} });
     b!("round",   |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.round()))}else{Err("round: not a number".into())} });
+    b!("sin",  |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.sin()))}else{Err("sin: not a number".into())} });
+    b!("cos",  |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.cos()))}else{Err("cos: not a number".into())} });
+    b!("tan",  |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.tan()))}else{Err("tan: not a number".into())} });
+    b!("atan", |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.atan()))}else{Err("atan: not a number".into())} });
+    b!("atan2",|args| { let (a,b)=num2(args)?; Ok(Value::Number(a.atan2(b))) });
+    b!("exp",  |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.exp()))}else{Err("exp: not a number".into())} });
+    // Natural log. Like sqrt on a negative, log of a non-positive number
+    // follows IEEE (NaN / -inf) rather than raising.
+    b!("log",  |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.ln()))}else{Err("log: not a number".into())} });
     b!("max", |args| { let vs=nums(args)?; Ok(Value::Number(vs.iter().cloned().fold(f64::NEG_INFINITY,f64::max))) });
     b!("min", |args| { let vs=nums(args)?; Ok(Value::Number(vs.iter().cloned().fold(f64::INFINITY,f64::min))) });
 

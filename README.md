@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.30.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.31.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -260,8 +260,9 @@ maturin build          # build wheel for distribution
 ```lisp
 ;; Compiles a restricted numeric subset to real Rust via rustc and
 ;; dynamically loads it: numbers, params, let/let* locals, + - * /,
-;; sqrt expt abs mod floor ceiling round min max, if/cond (comparison
-;; conditions), and self-recursive calls — everything is f64.
+;; sqrt expt abs mod floor ceiling round min max sin cos tan atan atan2
+;; exp log, if/cond (comparison conditions), and self-recursive calls —
+;; everything is f64.
 ;; ~1000x faster than the tree-walked equivalent once compiled (measured
 ;; on fib(30): ~8.2s interpreted vs. ~0.007s compiled, cached).
 (defrust fib (n)
