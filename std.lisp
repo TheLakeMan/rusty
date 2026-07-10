@@ -69,6 +69,15 @@
        (set! ,a ,b)
        (set! ,b ,tmp))))
 
+;; (time expr) — evaluate expr, print elapsed wall time in seconds, return its
+;; value. Uses the now-micros builtin; handy for the defrust/JIT comparison.
+(defmacro time (expr)
+  (let ((t0 (gensym "t0")) (r (gensym "r")))
+    `(let* ((,t0 (now-micros))
+            (,r ,expr))
+       (println "time: " (/ (- (now-micros) ,t0) 1000000.0) " s")
+       ,r)))
+
 ;; ── Macro profiler ─────────────────────────────────────────────────────────
 ;; (macro-profile-on) / (macro-profile-off) toggle instrumentation (off by
 ;; default — zero overhead when unused). (macro-profile-report) returns raw
