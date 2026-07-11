@@ -23,6 +23,9 @@ grad tan
 grad atan
 grad exp
 grad log
+native check-exhaustive verified
+native counterexample
+native = interpreted, incl. counterexamples
 number?
 list?
 procedure?

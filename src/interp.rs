@@ -806,6 +806,77 @@ pub fn setup_builtins(env: &Env) {
         if total > 1_000_000 {
             return Err(format!("check-exhaustive: state space too large ({} > 1000000 combinations)", total));
         }
+        // ── Native property fast path (v0.36.0) ─────────────────────────
+        // A defrust-compiled property is a pure extern "C" fn over f64s:
+        // call it directly per point (no interpreter dispatch), and split
+        // the flat index space across threads — only f64s cross a thread
+        // boundary, the Rc'd Lisp world never leaves this thread, and the
+        // .so outlives the scope because the Value holding its Rc<Library>
+        // is borrowed for the duration. Convention: result != 0.0 means
+        // the property HOLDS (defrust has no booleans — return 1.0/0.0).
+        // Counterexamples are collected per chunk and merged in chunk
+        // order, so output is bit-identical to the serial sweep.
+        if let Value::Native { arity, fn_ptr, .. } = property {
+            if *arity != domains.len() {
+                return Err(format!(
+                    "check-exhaustive: native property takes {} args, got {} domains",
+                    arity, domains.len()));
+            }
+            let doms: Vec<Vec<f64>> = domains.iter().map(|d| d.iter().map(|v| match v {
+                Value::Number(n) => Ok(*n),
+                other => Err(format!(
+                    "check-exhaustive: a native property needs all-numeric domains, got {}", other)),
+            }).collect::<Result<Vec<_>, String>>()).collect::<Result<_, _>>()?;
+            let nd = doms.len();
+            let fp = *fn_ptr as usize;
+            // RUSTY_CE_THREADS overrides (benchmarking, core-pinned embedded)
+            let threads = match std::env::var("RUSTY_CE_THREADS").ok().and_then(|s| s.parse::<usize>().ok()) {
+                Some(n) => n.max(1),
+                None if total >= 16_384 =>
+                    std::thread::available_parallelism().map(|n| n.get().min(16)).unwrap_or(1),
+                None => 1,
+            };
+            let chunk = total.div_ceil(threads);
+            let mut failures: Vec<Vec<f64>> = Vec::new();
+            std::thread::scope(|s| {
+                let mut handles = Vec::new();
+                for t in 0..threads {
+                    let lo = t * chunk;
+                    let hi = ((t + 1) * chunk).min(total);
+                    if lo >= hi { break; }
+                    let doms = &doms;
+                    handles.push(s.spawn(move || {
+                        let f: extern "C" fn(*const f64, usize) -> f64 =
+                            unsafe { std::mem::transmute(fp as *const ()) };
+                        let mut idx = vec![0usize; nd];
+                        let mut rem = lo;
+                        for pos in (0..nd).rev() { idx[pos] = rem % doms[pos].len(); rem /= doms[pos].len(); }
+                        let mut buf = vec![0f64; nd];
+                        let mut cex = Vec::new();
+                        for _ in lo..hi {
+                            for (k, &i) in idx.iter().enumerate() { buf[k] = doms[k][i]; }
+                            if f(buf.as_ptr(), nd) == 0.0 { cex.push(buf.clone()); }
+                            for pos in (0..nd).rev() {
+                                idx[pos] += 1;
+                                if idx[pos] < doms[pos].len() { break; }
+                                idx[pos] = 0;
+                            }
+                        }
+                        cex
+                    }));
+                }
+                for h in handles { failures.extend(h.join().expect("check-exhaustive worker panicked")); }
+            });
+            return if failures.is_empty() {
+                Ok(Value::Symbol("verified".to_string()))
+            } else {
+                Ok(list(failures.into_iter().map(|args| list(vec![
+                    list(args.into_iter().map(Value::Number).collect()),
+                    Value::String("false".to_string()),
+                ])).collect()))
+            };
+        }
+
         let eval = Evaluator::new();
         let mut counterexamples = Vec::new();
         let mut indices = vec![0usize; domains.len()];

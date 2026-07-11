@@ -76,6 +76,26 @@
     (assert-true (close? ((grad (lambda (x) (log x))) 2) 0.5) "grad log")
     "math-ok"))
 
+; Native check-exhaustive (v0.36.0): a defrust-compiled property is swept
+; by direct native calls (parallel above 16k states). Convention: the
+; property returns nonzero for "holds". Must agree with the interpreted
+; path on verdicts and counterexamples.
+(defrust ce-prop (x y) (if (< (+ x y) 18) 1 0))
+(def test-native-ce ()
+  (begin
+    (assert-equal (quote verified)
+      (check-exhaustive ce-prop (list (range 0 5) (range 0 5)))
+      "native check-exhaustive verified")
+    (assert-equal (quote (((9 9) "false")))
+      (check-exhaustive ce-prop (quote ((9) (9))))
+      "native counterexample")
+    (assert-true
+      (equal? (check-exhaustive ce-prop (list (range 0 12) (range 0 12)))
+              (check-exhaustive (lambda (x y) (< (+ x y) 18))
+                                (list (range 0 12) (range 0 12))))
+      "native = interpreted, incl. counterexamples")
+    "native-ce-ok"))
+
 ; Types
 (def test-types ()
   (begin
@@ -92,6 +112,7 @@
     (test-lists-extra)
     (test-macro)
     (test-math)
+    (test-native-ce)
     (test-types)
     (print "NEW FEATURES PASSED")))
 

@@ -16,6 +16,10 @@
 ;;   v0.35.0 (let bindings by reference): let-500k 0.573→0.527 s, drone
 ;;   x-axis proof 2.33→2.25 s — no bindings Vec / name+init clones / body
 ;;   to_vec per let evaluation
+;;   v0.36.0 (native check-exhaustive): a defrust-compiled property sweeps
+;;   by direct call, parallel across cores >=16k states (RUSTY_CE_THREADS
+;;   overrides). Drone x-axis proof, 79,992 states: interpreted 2.25 s ->
+;;   native serial 2.7 ms (~840x) -> native parallel 1.2 ms (~1,890x).
 ;; cons itself still copies per call (documented O(n) — build with
 ;; accumulate+reverse or range, both linear).
 
