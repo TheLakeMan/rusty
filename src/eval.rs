@@ -895,26 +895,47 @@ impl Evaluator {
     }
 
     // ── let forms ─────────────────────────────────────────────────────────
+    // let/let*/letrec evaluate bindings by REFERENCE (v0.35.0 profiling):
+    // the old shape went through extract_let_parts, which allocated a
+    // bindings Vec, cloned every name String and init Expr, and to_vec'd
+    // the body — several allocations per let per evaluation, dominant in
+    // let-heavy code like the shouzhong proofs. Only the map key clone and
+    // the (usually Rc-bump) body clone remain.
     fn eval_let(&self, list: &[Expr], env: &Env) -> Result<(Expr, Env), String> {
-        let (bindings, body) = extract_let_parts(list)?;
+        let bs = let_bindings(list)?;
         let child = EnvFrame::new(Some(env.clone()));
-        for (n, e) in bindings { EnvFrame::set(&child, n, self.eval(&e, env)?); }
-        Ok((wrap_begin(body), child))
+        for b in bs.iter() {
+            let (n, init) = let_pair(b)?;
+            let v = self.eval(init, env)?;
+            EnvFrame::set(&child, n.clone(), v);
+        }
+        Ok((body_expr(&list[2..]), child))
     }
 
     fn eval_let_star(&self, list: &[Expr], env: &Env) -> Result<(Expr, Env), String> {
-        let (bindings, body) = extract_let_parts(list)?;
+        let bs = let_bindings(list)?;
         let child = EnvFrame::new(Some(env.clone()));
-        for (n, e) in bindings { let v = self.eval(&e, &child)?; EnvFrame::set(&child, n, v); }
-        Ok((wrap_begin(body), child))
+        for b in bs.iter() {
+            let (n, init) = let_pair(b)?;
+            let v = self.eval(init, &child)?;
+            EnvFrame::set(&child, n.clone(), v);
+        }
+        Ok((body_expr(&list[2..]), child))
     }
 
     fn eval_letrec(&self, list: &[Expr], env: &Env) -> Result<(Expr, Env), String> {
-        let (bindings, body) = extract_let_parts(list)?;
+        let bs = let_bindings(list)?;
         let child = EnvFrame::new(Some(env.clone()));
-        for (n, _) in &bindings { EnvFrame::set(&child, n.clone(), Value::Nil); }
-        for (n, e)  in bindings  { let v = self.eval(&e, &child)?; EnvFrame::set(&child, n, v); }
-        Ok((wrap_begin(body), child))
+        for b in bs.iter() {
+            let (n, _) = let_pair(b)?;
+            EnvFrame::set(&child, n.clone(), Value::Nil);
+        }
+        for b in bs.iter() {
+            let (n, init) = let_pair(b)?;
+            let v = self.eval(init, &child)?;
+            EnvFrame::set(&child, n.clone(), v);
+        }
+        Ok((body_expr(&list[2..]), child))
     }
 
     // Named let: (let loop ((i 0) (acc 1)) body...)
@@ -1057,19 +1078,30 @@ fn parse_params(exprs: &[Expr]) -> Result<(Vec<String>, Option<String>), String>
     Ok((params, rest))
 }
 
-fn extract_let_parts(list: &[Expr]) -> Result<(Vec<(String, Expr)>, Vec<Expr>), String> {
+fn let_bindings(list: &[Expr]) -> Result<&[Expr], String> {
     if list.len() < 3 { return Err("let: (let ((x v)...) body...)".into()); }
-    let bs = match &list[1] { Expr::List(b) => b, _ => return Err("let: bindings must be a list".into()) };
-    let mut bindings = Vec::new();
-    for b in bs.iter() {
-        if let Expr::List(pair) = b {
-            if pair.len() == 2 {
-                if let Expr::Symbol(n) = &pair[0] { bindings.push((n.clone(), pair[1].clone())); continue; }
-            }
+    match &list[1] { Expr::List(b) => Ok(b), _ => Err("let: bindings must be a list".into()) }
+}
+
+fn let_pair(b: &Expr) -> Result<(&String, &Expr), String> {
+    if let Expr::List(pair) = b {
+        if pair.len() == 2 {
+            if let Expr::Symbol(n) = &pair[0] { return Ok((n, &pair[1])); }
         }
-        return Err("let: each binding must be (name expr)".into());
     }
-    Ok((bindings, list[2..].to_vec()))
+    Err("let: each binding must be (name expr)".into())
+}
+
+/// Single-body lets return the body expression itself (a clone that is an
+/// Rc bump when it's a list); only multi-expression bodies build a begin.
+fn body_expr(body: &[Expr]) -> Expr {
+    if body.len() == 1 { body[0].clone() }
+    else {
+        let mut v = Vec::with_capacity(body.len() + 1);
+        v.push(Expr::Symbol("begin".into()));
+        v.extend_from_slice(body);
+        crate::parser::elist(v)
+    }
 }
 
 pub fn wrap_begin(mut exprs: Vec<Expr>) -> Expr {

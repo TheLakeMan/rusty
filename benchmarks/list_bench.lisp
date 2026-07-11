@@ -13,6 +13,9 @@
 ;;   v0.34.0 (leaf fast path in eval): fib25 0.166→0.154 s, let-500k
 ;;   0.638→0.573 s, drone x-axis proof 2.66→2.33 s — Symbol/Number args no
 ;;   longer clone an Expr (String alloc) per evaluation
+;;   v0.35.0 (let bindings by reference): let-500k 0.573→0.527 s, drone
+;;   x-axis proof 2.33→2.25 s — no bindings Vec / name+init clones / body
+;;   to_vec per let evaluation
 ;; cons itself still copies per call (documented O(n) — build with
 ;; accumulate+reverse or range, both linear).
 
