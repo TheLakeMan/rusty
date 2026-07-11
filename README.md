@@ -24,6 +24,8 @@ Rusty is the language you reach for when you need **computation that reasons abo
 
 **[shouzhong](https://github.com/TheLakeMan/shouzhong)** — provably-safe control loops: controllers proven safe over *every* state by `check-exhaustive` (down to a 3-D drone geofence with wind gusts quantified inside the proof domain — 120,351 states), actuators contract-gated per command, and LLM planners that can re-aim the plant but can never leave the fence. Proofs transfer to the `defrust`-compiled control law by exhaustive equality: prove it slow, run it fast. Zero new interpreter code.
 
+**[mingjian](https://github.com/TheLakeMan/mingjian)** — replay-verified audit: for a deterministic plant (pure `world-step` + command log), the log doesn't ask to be trusted — replay it, and any doctored command, truncated log, or forged outcome diverges at a named tick. Mechanizes the jailbreak battle-test rule (`mj-breaches`: `ok` verdicts the policy forbids, returned as data) and loads audits into the knowledge graph for queries. wuwei gates agents, shouzhong proves plants, mingjian proves what actually happened. Zero new interpreter code.
+
 ---
 
 ## Quick Start
