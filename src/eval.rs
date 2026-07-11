@@ -117,6 +117,22 @@ impl Evaluator {
     }
 
     pub fn eval(&self, expr: &Expr, env: &Env) -> Result<Value, String> {
+        // Leaf fast path (v0.34.0 profiling): the trampoline below clones
+        // `expr` on entry, and for Expr::Symbol that clone is a String
+        // allocation — paid on every argument evaluation, ~15% of
+        // call-heavy runtime. Leaves never loop, so answer them from the
+        // borrow before cloning anything.
+        match expr {
+            Expr::Number(n) => return Ok(Value::Number(*n)),
+            Expr::Bool(b)   => return Ok(Value::Bool(*b)),
+            Expr::String(s) => return Ok(Value::String(s.clone())),
+            Expr::Nil       => return Ok(Value::Nil),
+            Expr::Symbol(s) => {
+                return EnvFrame::get(env, s)
+                    .ok_or_else(|| format!("Undefined: '{}'", s));
+            }
+            _ => {}
+        }
         let mut cur = expr.clone();
         let mut env = env.clone();
 

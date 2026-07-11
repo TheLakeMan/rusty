@@ -10,6 +10,9 @@
 ;;   v0.33.0 (Rc lambda fields): fib25 0.195→0.166 s, cons-build-30k
 ;;   15.9→10.7 s, drone x-axis proof 2.99→2.66 s — lambda values no longer
 ;;   deep-copy params/body on every lookup/call
+;;   v0.34.0 (leaf fast path in eval): fib25 0.166→0.154 s, let-500k
+;;   0.638→0.573 s, drone x-axis proof 2.66→2.33 s — Symbol/Number args no
+;;   longer clone an Expr (String alloc) per evaluation
 ;; cons itself still copies per call (documented O(n) — build with
 ;; accumulate+reverse or range, both linear).
 
