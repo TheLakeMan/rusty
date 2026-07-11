@@ -296,7 +296,8 @@ pub fn setup_builtins(env: &Env) {
         _ => Err("car: not a pair".into()),
     });
     b!("cdr",   |args| match args.first() {
-        Some(Value::List(xs)) if !xs.is_empty() => Ok(list(xs[1..].to_vec())),
+        // O(1): shares the buffer at the next offset (see env::LSlice)
+        Some(Value::List(xs)) if !xs.is_empty() => Ok(Value::List(xs.tail())),
         Some(Value::Nil) => Err("cdr: empty list".into()),
         _ => Err("cdr: not a pair".into()),
     });
@@ -343,7 +344,8 @@ pub fn setup_builtins(env: &Env) {
         if args.len()!=2{return Err("member: 2 args".into());}
         if let Value::List(xs)=&args[1] {
             let idx = xs.iter().position(|x| value_equal(x,&args[0]));
-            Ok(match idx { Some(i)=>list(xs[i..].to_vec()), None=>Value::Bool(false) })
+            // O(1) suffix share — Scheme member returns the tail from the match
+            Ok(match idx { Some(i)=>Value::List(xs.advance(i)), None=>Value::Bool(false) })
         } else { Err("member: second arg must be a list".into()) }
     });
     b!("list-tail",|args| {
@@ -351,7 +353,7 @@ pub fn setup_builtins(env: &Env) {
         if let (Value::List(xs),Value::Number(n))=(&args[0],&args[1]) {
             let i=*n as usize;
             if i>xs.len(){return Err(format!("list-tail: index {} too large",i));}
-            Ok(list(xs[i..].to_vec()))
+            Ok(Value::List(xs.advance(i)))   // O(1) suffix share
         } else { Err("list-tail: (list-tail list n)".into()) }
     });
     b!("map",|args| {
