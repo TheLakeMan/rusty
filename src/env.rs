@@ -68,23 +68,27 @@ pub enum Value {
     Symbol(String),
     List(LSlice),                   // shared slice — clone AND cdr are O(1)
     Builtin(&'static str, fn(&[Value]) -> Result<Value, String>),
+    // params/body are Rc'd (v0.32.0 profiling): every call site looks a
+    // lambda up and CLONES the Value — with plain Vecs that deep-copied
+    // the param strings and body exprs on every single call (~25% of
+    // call-heavy runtime). Rc makes the clone three refcount bumps.
     Lambda {
-        params: Vec<String>,
+        params: Rc<Vec<String>>,
         rest:   Option<String>,
-        body:   Vec<Expr>,
+        body:   Rc<Vec<Expr>>,
         env:    Env,
     },
     Macro {
-        params: Vec<String>,
+        params: Rc<Vec<String>>,
         rest:   Option<String>,
-        body:   Vec<Expr>,
+        body:   Rc<Vec<Expr>>,
         env:    Env,
     },
     Tool {
         name: String,
         description: String,
-        params: Vec<String>,
-        body: Vec<Expr>,
+        params: Rc<Vec<String>>,
+        body: Rc<Vec<Expr>>,
         env: Env,
     },
     // Native tensor (Phase 3.1): flat row-major f64 buffer + shape.

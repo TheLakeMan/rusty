@@ -565,7 +565,8 @@ pub fn setup_builtins(env: &Env) {
                 if body.len() != 1 { return Err("grad: lambda body must be a single expression".into()); }
                 let derivative = crate::eval::symbolic_derivative(&body[0], &params[0])?;
                 Ok(Value::Lambda {
-                    params: params.clone(), rest: rest.clone(), body: vec![derivative], env: env.clone(),
+                    params: params.clone(), rest: rest.clone(),
+                    body: std::rc::Rc::new(vec![derivative]), env: env.clone(),
                 })
             }
             _ => Err("grad: (grad (lambda (x ...) expr)) — argument must be a lambda".into()),

@@ -7,8 +7,11 @@
 ;; Recorded on the reference machine (release build):
 ;;   v0.31.0: cdr-walk-30k 6.39 s   (cdr copied the tail — O(n²) traversal)
 ;;   v0.32.0: cdr-walk-30k 0.028 s  (LSlice offset cdr — ~230×)
-;;   cons-build-30k ~16 s both — cons still copies (documented; build with
-;;   accumulate+reverse or range, both linear)
+;;   v0.33.0 (Rc lambda fields): fib25 0.195→0.166 s, cons-build-30k
+;;   15.9→10.7 s, drone x-axis proof 2.99→2.66 s — lambda values no longer
+;;   deep-copy params/body on every lookup/call
+;; cons itself still copies per call (documented O(n) — build with
+;; accumulate+reverse or range, both linear).
 
 (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
 (print (list 'fib25 (time (fib 25))))

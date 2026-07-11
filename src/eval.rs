@@ -186,9 +186,9 @@ impl Evaluator {
                                     Value::String(s) => s,
                                     _ => return Err("deftool: description must be a string".into()),
                                 };
-                                let body = lst[4..].to_vec();
+                                let body = std::rc::Rc::new(lst[4..].to_vec());
                                 EnvFrame::set(&env, name.clone(), Value::Tool {
-                                    name, description, params, body, env: env.clone(),
+                                    name, description, params: std::rc::Rc::new(params), body, env: env.clone(),
                                 });
                                 return Ok(Value::Nil);
                             }
@@ -654,8 +654,8 @@ impl Evaluator {
                                 // introduces (let/lambda/do bindings inside quasiquote)
                                 // to fresh gensyms, so they can't capture or be captured
                                 // by identifiers from the use site.
-                                let body = retained.iter().map(hygienic_rename_top).collect();
-                                EnvFrame::set(&env, name, Value::Macro { params, rest, body, env: def_env });
+                                let body = std::rc::Rc::new(retained.iter().map(hygienic_rename_top).collect::<Vec<_>>());
+                                EnvFrame::set(&env, name, Value::Macro { params: std::rc::Rc::new(params), rest, body, env: def_env });
                                 return Ok(Value::Nil);
                             }
 
@@ -847,8 +847,8 @@ impl Evaluator {
             Expr::List(sig) => {
                 let name = sym_name(sig.first().ok_or("define: empty signature")?, "define")?;
                 let (params, rest) = parse_params(&sig[1..])?;
-                let body = list[2..].to_vec();
-                EnvFrame::set(env, name, Value::Lambda { params, rest, body, env: env.clone() });
+                let body = std::rc::Rc::new(list[2..].to_vec());
+                EnvFrame::set(env, name, Value::Lambda { params: std::rc::Rc::new(params), rest, body, env: env.clone() });
             }
             _ => return Err("define: first arg must be symbol or list".into()),
         }
@@ -863,8 +863,8 @@ impl Evaluator {
             Expr::List(ps) => parse_params(ps)?,
             _ => return Err("def: params must be a list".into()),
         };
-        let body = list[3..].to_vec();
-        EnvFrame::set(env, name, Value::Lambda { params, rest, body, env: env.clone() });
+        let body = std::rc::Rc::new(list[3..].to_vec());
+        EnvFrame::set(env, name, Value::Lambda { params: std::rc::Rc::new(params), rest, body, env: env.clone() });
         Ok(Value::Nil)
     }
 
@@ -875,7 +875,7 @@ impl Evaluator {
             Expr::Symbol(s) => (vec![], Some(s.clone())),
             _ => return Err("lambda: params must be a list or symbol".into()),
         };
-        Ok(Value::Lambda { params, rest, body: list[2..].to_vec(), env: env.clone() })
+        Ok(Value::Lambda { params: std::rc::Rc::new(params), rest, body: std::rc::Rc::new(list[2..].to_vec()), env: env.clone() })
     }
 
     // ── let forms ─────────────────────────────────────────────────────────
@@ -928,8 +928,8 @@ impl Evaluator {
         // Create env with the loop function bound
         let loop_env = EnvFrame::new(Some(env.clone()));
         let lambda = Value::Lambda {
-            params: params.clone(), rest: None,
-            body: body.clone(), env: loop_env.clone(),
+            params: std::rc::Rc::new(params.clone()), rest: None,
+            body: std::rc::Rc::new(body.clone()), env: loop_env.clone(),
         };
         EnvFrame::set(&loop_env, name.to_string(), lambda);
         // Bind initial param values
