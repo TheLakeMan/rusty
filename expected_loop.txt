@@ -1,4 +1,4 @@
-Loop v0.2.1 core loaded.
+Loop v0.2.2 core loaded.
 Loop questions loaded: 22 questions across 10 categories.
 1a start category is childhood
 1b start qid is first childhood question
@@ -44,4 +44,8 @@ Paused. Resume with: (loop-resume "loop-PauseB-1000000")
 8g depth
 8h asked list
 8i asked list is multi-element (delimiter round-trips)
+9a childhood-001 has follow-ups available
+9b continue does NOT drill a follow-up
+9c continue moves straight to the next question
+9d question marked asked without drilling
 LOOP TESTS PASSED

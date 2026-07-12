@@ -5,7 +5,7 @@
 ;; loop-core.lisp — Loop Interview Engine v0.2.1
 ;; ─────────────────────────────────────────────────────────────────────────────
 
-(define LOOP-VERSION "0.2.1")
+(define LOOP-VERSION "0.2.2")
 (define MAX-FOLLOW-UPS 3)
 
 
@@ -215,7 +215,7 @@
 ;; (moving to a new question or category). During follow-ups we stay
 ;; on the same question — it is NOT added to asked-ids until we leave it.
 
-(define (advance-session session transcript)
+(define (advance-session session transcript advice)
   (let* ((cur-qid (session-current-qid session))
          (depth   (session-follow-up-depth session))
          (cur-q   (get-question-by-id cur-qid))
@@ -225,8 +225,12 @@
     (save-response (session-id session) cur-qid depth transcript)
 
     (cond
-      ;; Still have follow-ups — go deeper, do NOT mark question as asked yet
-      ((and (< depth MAX-FOLLOW-UPS)
+      ;; Drill a follow-up ONLY when the advisor judged this response worth
+      ;; going deeper (and there is room). "continue" skips any remaining
+      ;; follow-ups and moves on; the question is not marked asked while we're
+      ;; still drilling it.
+      ((and (equal? advice "follow-up")
+            (< depth MAX-FOLLOW-UPS)
             (not (null? fups))
             (< depth (length fups)))
        (list (session-set session "depth" (+ depth 1))
@@ -293,7 +297,7 @@
         (if (equal? advice "complete")
           (list (session-set session "status" "complete")
                 (loop-closing session))
-          (advance-session session transcript))))
+          (advance-session session transcript advice))))
         (save-session (nth result 0))
         result))))
 

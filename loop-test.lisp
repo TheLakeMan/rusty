@@ -160,11 +160,12 @@
 (reset-all)
 (let* ((r0 (start-session "Advance"))
        (s0 (nth r0 0)))
-  ;; childhood: 001(4 turns) + 002(3) + 003(3) = 10th turn crosses the boundary
-  (let* ((s9 (drive-check s0 9))
-         (r10 (loop-turn s9 "resp"))
-         (s10 (nth r10 0))
-         (text (nth r10 1)))
+  ;; With the advisor saying "continue" (the default), follow-ups are skipped,
+  ;; so childhood's 3 questions take one turn each — the 3rd turn crosses.
+  (let* ((s2 (drive-check s0 2))
+         (r3 (loop-turn s2 "resp"))
+         (s10 (nth r3 0))
+         (text (nth r3 1)))
     (assert-equal "family-and-roots" (session-current-category s10)
                   "5a advanced to next category in CATEGORY-ORDER")
     (assert-equal "Let's move on." (substring text 0 14)
@@ -222,7 +223,7 @@
 (reset-all)
 (let* ((r0 (start-session "Fidelity"))
        (s0 (nth r0 0))
-       (src (drive-check s0 7)))            ; asked = childhood-001, childhood-002; qid=003
+       (src (drive-check s0 7)))            ; "continue" (default): 7 questions asked across categories
   (save-session src)
   (let ((ld (load-session (session-id src))))
     (assert-equal (session-id src)               (session-id ld)               "8a id")
@@ -234,6 +235,26 @@
     (assert-equal (session-follow-up-depth src)  (session-follow-up-depth ld)  "8g depth")
     (assert-equal (session-asked-ids src)        (session-asked-ids ld)        "8h asked list")
     (assert-true  (> (length (session-asked-ids ld)) 1) "8i asked list is multi-element (delimiter round-trips)")))
+
+
+;; ── Invariant 9: the advisor actually gates follow-ups ─────────────────────────
+;; childhood-001 HAS follow-ups, but a "continue" verdict must SKIP them and move
+;; straight on — this is the whole point of wiring the advisor into advance-session.
+;; (Contrast invariant 2, where "follow-up" drills into those same follow-ups.)
+(reset-all)
+(set! *advice-script* (list "continue"))
+(let* ((r0 (start-session "Advisor"))
+       (s0 (nth r0 0))
+       (r1 (loop-turn s0 "done with this one"))
+       (s1 (nth r1 0)))
+  (assert-true (> (length (question-follow-ups q-childhood-001)) 0)
+               "9a childhood-001 has follow-ups available")
+  (assert-equal 0 (session-follow-up-depth s1)
+                "9b continue does NOT drill a follow-up")
+  (assert-equal "childhood-002" (session-current-qid s1)
+                "9c continue moves straight to the next question")
+  (assert-true (list-contains? (session-asked-ids s1) "childhood-001")
+               "9d question marked asked without drilling"))
 
 
 (print "LOOP TESTS PASSED")
