@@ -2,7 +2,7 @@
 ;;; SPDX-License-Identifier: AGPL-3.0-or-later
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; loop-core.lisp — Loop Interview Engine v0.2.1
+;; loop-core.lisp — Loop Interview Engine v0.2.2
 ;; ─────────────────────────────────────────────────────────────────────────────
 
 (define LOOP-VERSION "0.2.2")
@@ -14,28 +14,11 @@
 (define (current-unix-time)
   (string->number (shell "printf '%s' $(date +%s)")))
 
-(define (string-contains haystack needle)
-  (let ((hlen (string-length haystack))
-        (nlen (string-length needle)))
-    (if (> nlen hlen) #f
-      (let loop ((i 0))
-        (cond
-          ((> (+ i nlen) hlen) #f)
-          ((equal? (substring haystack i (+ i nlen)) needle) #t)
-          (else (loop (+ i 1))))))))
-
-(define (string-split str delim)
-  (let ((dlen (string-length delim))
-        (slen (string-length str)))
-    (if (= slen 0) (list)
-      (let loop ((i 0) (start 0) (acc (list)))
-        (cond
-          ((> (+ i dlen) slen)
-           (reverse (cons (substring str start slen) acc)))
-          ((equal? (substring str i (+ i dlen)) delim)
-           (loop (+ i dlen) (+ i dlen)
-                 (cons (substring str start i) acc)))
-          (else (loop (+ i 1) start acc)))))))
+;; Substring search and delimiter split use Rusty's native builtins
+;; (string-contains? / string-split, since 0.26.0). Verified equivalent to
+;; the former hand-rolled versions for loop's usage: (string-contains? hay
+;; needle) matches the old arg order, and (string-split "a|b|c" "|") →
+;; ("a" "b" "c") — the exact asked-list round-trip in save/load-session.
 
 (define (list-contains? lst item)
   (not (null? (filter (lambda (x) (equal? x item)) lst))))
@@ -49,13 +32,21 @@
 
 
 ;; ── Directories ───────────────────────────────────────────────────────────────
-;; Use $HOME directly in shell commands to avoid newline issues
+;; Rusty has no native env/home builtin, so $HOME is resolved with a single
+;; minimal shell call (the only shell-out in the persistence path). Directory
+;; creation and path building are otherwise fully native.
+
+(define (loop-home)
+  (chomp (shell "printf '%s' $HOME")))
 
 (define (ensure-dirs)
-  (shell "mkdir -p $HOME/.loop/sessions $HOME/.loop/responses"))
+  ;; dir-create makes parent dirs, so ~/.loop is created implicitly.
+  (let ((base (str (loop-home) "/.loop")))
+    (dir-create (str base "/sessions"))
+    (dir-create (str base "/responses"))))
 
 (define (responses-dir)
-  (chomp (shell "printf '%s/.loop/responses' $HOME")))
+  (str (loop-home) "/.loop/responses"))
 
 
 ;; ── Data constructors / accessors ─────────────────────────────────────────────
@@ -125,7 +116,7 @@
     ;; Add to index if new
     (let ((idx (recall "loop.index")))
       (let ((existing (if (nil? idx) "" idx)))
-        (if (not (string-contains existing id))
+        (if (not (string-contains? existing id))
           (remember "loop.index"
             (if (equal? existing "") id (str existing "|" id))))))
     session))
@@ -153,8 +144,9 @@
       (filter (lambda (s) (not (equal? s "")))
               (string-split idx "|")))))
 
-;; Save a response transcript to a file.
-;; Uses python3 for safe file writing (avoids shell quoting issues).
+;; Save a response transcript to a file, using Rusty's native file-write
+;; (no python3, no shell quoting). Content is identical to the former
+;; heredoc body: "question: <id>\ndepth: <n>\n---\n<transcript>\n".
 (define (save-response session-id question-id depth transcript)
   (ensure-dirs)
   (let* ((rkey   (skey session-id "rcount"))
@@ -163,17 +155,11 @@
          (fname  (str (responses-dir) "/"
                       session-id "-"
                       (number->string rcount) ".txt")))
-    (shell (str "python3 -c \""
-                "import sys; "
-                "f = open('" fname "', 'w'); "
-                "f.write(sys.stdin.read()); "
-                "f.close()"
-                "\" << 'LOOP_EOF'\n"
-                "question: " question-id "\n"
-                "depth: " (number->string depth) "\n"
-                "---\n"
-                transcript
-                "\nLOOP_EOF"))
+    (file-write fname
+      (str "question: " question-id "\n"
+           "depth: " (number->string depth) "\n"
+           "---\n"
+           transcript "\n"))
     (remember rkey (number->string (+ rcount 1)))))
 
 
@@ -282,8 +268,8 @@
            "One word:")))
     (let ((raw (llm prompt 0.2 10)))
       (cond
-        ((string-contains raw "follow") "follow-up")
-        ((string-contains raw "complete") "complete")
+        ((string-contains? raw "follow") "follow-up")
+        ((string-contains? raw "complete") "complete")
         (else "continue")))))
 
 
