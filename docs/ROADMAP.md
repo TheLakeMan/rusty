@@ -1,4 +1,4 @@
-# Rusty 5-Year Roadmap
+# Rusty Roadmap
 
 ## Vision
 
@@ -8,7 +8,7 @@ Make Rusty the language people reach for when they need **computation that reaso
 
 ### North Star
 
-In 5 years, Rusty will be:
+The engineering is built; what remains is reach. The aim:
 - **Deeply embedded in AI/ML infrastructure** where symbolic computation bridges abstract mathematical logic and high-performance numerical execution
 - **The canonical tool** for building neuro-symbolic systems that combine neural networks with logic-driven reasoning
 - **Proven in production** across 2-3 high-impact domains (formal verification, robotics control, or scientific computing)
@@ -19,7 +19,7 @@ Rusty is a DSL, not a research platform accumulating a dependency graph. Every c
 
 ---
 
-## Phase 1: Symbolic Transformation Layer (Months 0–12)
+## Phase 1: Symbolic Transformation Layer
 
 **Goal:** Establish Rusty as a kernel for writing DSLs that compile to optimized computation graphs.
 
@@ -45,7 +45,7 @@ Rusty is a DSL, not a research platform accumulating a dependency graph. Every c
 
 ---
 
-## Phase 2: Verifiable AI Systems (Months 12–24)
+## Phase 2: Verifiable AI Systems
 
 **Goal:** Make Rusty the language for provably correct AI.
 
@@ -71,7 +71,7 @@ Everything here was already built self-contained, before "no external runtime de
 
 ---
 
-## Phase 3: Native ML Capability (Months 24–36)
+## Phase 3: Native ML Capability
 
 **Goal:** Make Rusty capable of real numeric/ML workloads on its own — benchmarked *against* PyTorch/JAX, never dependent *on* them.
 
@@ -97,7 +97,7 @@ Everything here was already built self-contained, before "no external runtime de
 
 ---
 
-## Phase 4: Ecosystem & Libraries (Months 36–48)
+## Phase 4: Ecosystem & Libraries
 
 **Goal:** Build killer applications proving Rusty's value.
 
@@ -123,7 +123,7 @@ Everything here was already built self-contained, before "no external runtime de
 
 ---
 
-## Phase 5: Maturity & Adoption (Months 48–60)
+## Phase 5: Maturity & Adoption
 
 **Goal:** Establish Rusty as a recognized standard.
 
@@ -149,55 +149,15 @@ Everything here was already built self-contained, before "no external runtime de
 
 ## Key Milestones & Checkpoints
 
-| Phase | Timeline | Key Deliverable | Success Metric |
-|-------|----------|-----------------|----------------|
-| 1 | Q1–Q4 2025 | Symbolic DSL + code generation | Rusty-generated code ≥ PyTorch performance |
-| 2 | Q1–Q2 2026 | Self-contained verification | Tool specifications verified via Rusty's own checkers (no external prover) |
-| 3 | Q3–Q4 2026 | Native ML capability | Rusty-native tensor workload benchmarked against PyTorch |
-| 4 | Q1–Q4 2027 | Killer app libraries | Symbolic regression outperforms SOTA |
-| 5 | Q1 2028+ | Maturity | v1.0.0 release, 10+ production users |
+Projected across five years; the engineering landed far faster. Status by phase:
 
----
-
-## Near-Term Action Items (Next 3 Months)
-
-This section is now stale relative to actual progress — most of it shipped in Phase 1/2.2 already, and one line below ("integrate with a simple ML framework") is exactly the external-dependency framing the Design Constraint above rules out. Left visible rather than deleted so it's clear what changed and why.
-
-### Immediate (This Sprint)
-- [x] Complete ARCHITECTURE.md documenting evaluator and macro system — evaluator/macro sections were already there; completed with a current subsystem map (v0.25.0) covering everything shipped since (graph IR, checkers, tracing, checkpoint, actors, synthesis/prover layers), replacing the stale "Future Improvements" list.
-- [x] Write 3 macro examples showing code generation potential — TUTORIAL.md §3: `defrecord` (constructor + per-field getters from one call), `define-memo` (a define that generates its own cache), `defproperty` (compact syntax → exhaustive-check harness). All three verified running; the third documents the literal-`lambda`-in-template hygiene trap and its house fix.
-- [x] Benchmark current macro performance — `(macro-profile-on)`/`(macro-profile-report)`/`(show-macro-profile)`, Phase 1.1
-- [x] Set up CI/CD with performance regression detection — CI (build + golden suite + clippy) already existed; added the `perf` job running `benchmarks/perf_gate.lisp`: **ratio-based gates** (defrust-vs-interpreted speedup ≥ 50× — healthy ~334×; fusion-vs-tree-walk ≥ 3× on a 170-node kernel — healthy ~23×; plus an exact-agreement correctness check), chosen because compiled-vs-interpreted ratios on the *same* runner are machine-independent, so noisy shared-runner clocks can't flake the gate while any real regression trips it.
-
-### Next Sprint (Month 2)
-- [x] Implement compile-time evaluation (`eval-when`) — Phase 1.1
-- [x] Build first symbolic differentiation macro — `grad`, Phase 1.2
-- [x] Create computation graph IR prototype — `src/graph_ir.rs`, Phase 1.2 (further along than "prototype": has CSE/constant-folding/DCE, not just a data structure)
-- [x] Publish benchmark comparison vs. PyTorch — published in-repo: README's Tensor Autodiff section (bit-for-bit gradient parity; 11.8×/1.4× training-loop numbers, fused-kernel update in v0.20.0) and ROADMAP 3.1/3.3 notes carry the full methodology; `benchmarks/` holds the reproducible agent and symreg/gplearn comparisons. Graph IR → defrust codegen (the blocker this item named) shipped in 3.3.
-
-### Sprint 3 (Month 3)
-- [x] Finalize graph optimization passes — Phase 1.2
-- [x] Begin neuro-symbolic bridge library design — Phase 1.3 (`defun-constrained`/`logic-loss`)
-- [x] ~~Integrate with simple ML framework~~ — superseded by Phase 3.1's native tensor type; no ML framework dependency, per the Design Constraint above (closed as superseded, nothing to build).
-- [x] Write user-facing tutorial — `docs/TUTORIAL.md` (see 5.1).
-
----
-
-## Resource Allocation
-
-### Current (v0.10.0)
-- 1 maintainer (TheLakeMan)
-- Focus: Core language stability, tool system, ReAct integration
-
-### Phase 1 (Target: v0.15–0.20)
-- Need: +1 core developer (macro systems, DSL design)
-- Need: +1 community contributor (testing, documentation)
-
-### Phase 2 (Target: v0.25–0.30)
-- Need: +1 formal-methods-literate contributor (self-built verification/checker design — no Lean interop needed, per the design constraint above)
-
-### Phase 3+ (Target: v0.5–1.0)
-- Need: Small team (3–5) for ML integration and performance
+| Phase | Key Deliverable | Status |
+|-------|-----------------|--------|
+| 1 | Symbolic DSL + code generation | Delivered — `defrust` compiles a numeric subset to real Rust, far above tree-walking |
+| 2 | Self-contained verification | Delivered — tool specs verified by Rusty's own checkers, no external prover |
+| 3 | Native ML capability | Delivered — native tensors + reverse-mode autodiff, verified bit-for-bit against PyTorch |
+| 4 | Killer-app libraries | Delivered — symbolic regression, synthesis, proof assistant, robotics (all golden-tested) |
+| 5 | Maturity & adoption | Engineering complete (v0.36.0); adoption (5.3) is the only work left |
 
 ---
 
@@ -210,6 +170,6 @@ This section is now stale relative to actual progress — most of it shipped in 
 
 ---
 
-**Last updated:** July 2026 | **Status:** Every item buildable by engineering alone is done — Phases 1–4 complete with all deliverables measured and met; 5.1 and 5.2 complete (SPEC, tutorial, package manager, rusty-lsp, testkit, CI perf gates); 1.3's knowledge-graph bindings resolved by owner decision (self-built store + N-Triples, beats rdflib ~10–24× on identical data). The only open items are 5.3's community goals (flagship adopters, academic partnerships, production deployments — these need users, not commits). v0.29.0, 12-check suite green, CI green incl. the perf gate.
+**Last updated:** July 2026 | **Status:** Every item buildable by engineering alone is done — Phases 1–4 complete with all deliverables measured and met; 5.1 and 5.2 complete (SPEC, tutorial, package manager, rusty-lsp, testkit, CI perf gates); 1.3's knowledge-graph bindings resolved by owner decision (self-built store + N-Triples, beats rdflib ~10–24× on identical data). The only open items are 5.3's community goals (flagship adopters, academic partnerships, production deployments — these need users, not commits). v0.36.0, 12-check suite green, CI green incl. the perf gate.
 
 ☯ *In memory of my brother.*
