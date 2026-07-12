@@ -1,6 +1,6 @@
 # The Rusty Language Specification
 
-**Version:** 1.0.0 · **Status:** normative for the 1.x series
+**Version:** 0.26.0 · **Status:** normative for the 0.x series
 **Conformance:** an implementation (or a change to this one) conforms iff
 `./run_tests.sh` passes — its golden files are the executable test
 suite for everything this document states.
@@ -197,24 +197,21 @@ semantics, but their contracts are stable:
 
 ## 11. Stability & compatibility policy
 
-As of **v1.0.0** the language contracts below are **frozen**. Rusty follows
-semver within the 1.x line:
+Rusty follows **semver discipline within 0.x**:
 
-- **Patch** (`1.0.Y`): fixes; no observable language change.
-- **Minor** (`1.X.0`): additive only — new builtins, special forms, library
-  layers, or an *additional* compiled-function entry point (e.g. a richer ABI
-  alongside the current one). Existing programs and artifacts keep working;
-  golden files change only by addition.
+- **Patch** (`0.x.Y`): fixes; no observable language change.
+- **Minor** (`0.X.0`): additive — new builtins, special forms, or
+  library layers. Existing programs keep working; golden files don't
+  change except by addition.
 - **Breaking changes** — to evaluation rules, truthiness, equality, the
   special-form list, the `defrust` C ABI, the checkpoint format, or the
-  `save-model` envelope — require a **major** version bump (2.0.0), a
-  migration note, and an update to this document in the same commit.
+  `save-model` envelope — require a **major** version bump (1.0 being
+  the first), a migration note in the changelog, and updates to this
+  document in the same commit.
 
-The **C ABI** (§9) is frozen as specified: one fixed signature per compilation
-path (`f64`-only, no error channel), symbol names `rusty_` + sanitized
-identifier. External callers may rely on it. A richer ABI — structured in/out,
-or an error/status channel — ships as a *new, additional* entry point in a 1.x
-minor, never by changing this one.
+The **C ABI** (§9) is frozen as specified: one fixed signature per
+compilation path, symbol names `rusty_` + sanitized identifier. External
+callers may rely on it.
 
 The golden files under `run_tests.sh` are the compatibility suite:
 any change that alters their expected output is by definition observable
