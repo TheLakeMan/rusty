@@ -29,4 +29,11 @@ native = interpreted, incl. counterexamples
 number?
 list?
 procedure?
+nil is truthy
+empty-list is truthy
+#f is false
+zero is truthy
+null? nil
+null? empty-list
+nil distinct from empty-list
 NEW FEATURES PASSED

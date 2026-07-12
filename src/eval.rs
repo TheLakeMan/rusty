@@ -1026,7 +1026,9 @@ impl Evaluator {
 // ── free helpers ─────────────────────────────────────────────────────────
 
 pub fn is_truthy(v: &Value) -> bool {
-    !matches!(v, Value::Bool(false) | Value::Nil)
+    // #f is the ONLY false value (SPEC §3). Nil, `()`, 0, and "" are all
+    // truthy — Nil stays a distinct value (JSON null / void), it is just not false.
+    !matches!(v, Value::Bool(false))
 }
 
 pub fn expr_to_value(e: &Expr) -> Value {

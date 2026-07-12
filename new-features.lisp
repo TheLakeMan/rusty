@@ -104,6 +104,19 @@
     (assert-true (procedure? (lambda (x) x)) "procedure?")
     "types-ok"))
 
+; truthiness (v0.37.0, B1): #f is the ONLY false value. Nil, empty list, 0
+; are all truthy; Nil stays distinct from the empty list (JSON null / void).
+(def test-truthiness ()
+  (begin
+    (assert-equal 1 (if () 1 0) "nil is truthy")
+    (assert-equal 1 (if (quote ()) 1 0) "empty-list is truthy")
+    (assert-equal 0 (if #f 1 0) "#f is false")
+    (assert-equal 1 (if 0 1 0) "zero is truthy")
+    (assert-true (null? ()) "null? nil")
+    (assert-true (null? (quote ())) "null? empty-list")
+    (assert-equal #f (equal? () (quote ())) "nil distinct from empty-list")
+    "truthiness-ok"))
+
 (def run-new-tests ()
   (begin
     (test-let)
@@ -114,6 +127,7 @@
     (test-math)
     (test-native-ce)
     (test-types)
+    (test-truthiness)
     (print "NEW FEATURES PASSED")))
 
 (run-new-tests)

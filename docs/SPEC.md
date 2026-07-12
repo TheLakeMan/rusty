@@ -31,12 +31,19 @@ disagreement is a bug in this document.
 
 ## 2. Values
 
-`Number` · `Bool` · `String` · `Symbol` · `List` · `Nil` (the empty list,
-prints `()`) · `Lambda` (closure) · `Macro` · `Builtin` · `Tool`
-(2.3 agent tool; first-class callable) · `Tensor` (flat row-major f64 +
+`Number` · `Bool` · `String` · `Symbol` · `List` · `Nil` (the void /
+JSON-`null` value; prints `()`) · `Lambda` (closure) · `Macro` · `Builtin` ·
+`Tool` (2.3 agent tool; first-class callable) · `Tensor` (flat row-major f64 +
 shape) · `Native` (a `defrust`-compiled function) · `NativeGrad` (a fused
 training kernel). Lists and tensors are reference-counted — copying a
 value is O(1) and never deep.
+
+`Nil` and an empty `List` are **distinct** values: both print `()` and both
+satisfy `null?`, but `type-of` tells them apart (`nil` vs `list`) and they are
+not `equal?`. `Nil` is what a conditional with no matching branch, `(begin)`,
+and JSON `null` produce; an empty `List` comes from list operations (`(list)`,
+`cdr` of a one-element list, an exhausted `filter`). Both are truthy (§3) — the
+distinction is preserved so JSON `null` round-trips distinctly from `[]`.
 
 `type-of` names these: `number boolean string symbol list nil lambda
 macro builtin tool tensor native native-grad`.
