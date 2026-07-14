@@ -73,12 +73,19 @@
 ;; overflow to inf (loses every comparison it should lose) or NaN (compares
 ;; false with everything, itself included — caught by the (= m m) test).
 (define (sr-fitness expr vars data)
-  (let ((f (eval (list 'lambda vars expr))))
-    (let ((m (/ (sum (map (lambda (row)
-                            (let ((d (- (apply f (car row)) (cadr row))))
-                              (* d d)))
-                          data))
-                (length data))))
+  ;; Fast path (v0.38.0): sr-eval-mse sweeps the rows natively with
+  ;; bit-identical ops in the same fold order as the eval path below. It
+  ;; returns nil for vocabulary it doesn't know (ops added via symreg-ops!,
+  ;; macro building blocks), so extended runs still work — just interpreted.
+  (let ((fast (sr-eval-mse expr vars data)))
+    (let ((m (if (nil? fast)
+                 (let ((f (eval (list 'lambda vars expr))))
+                   (/ (sum (map (lambda (row)
+                                  (let ((d (- (apply f (car row)) (cadr row))))
+                                    (* d d)))
+                                data))
+                      (length data)))
+                 fast)))
       (if (= m m) m 1e300))))
 
 ;; ── Variation ─────────────────────────────────────────────────────────────

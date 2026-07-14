@@ -89,6 +89,141 @@ pub fn nums(args: &[Value]) -> Result<Vec<f64>, String> {
     }).collect()
 }
 
+// ── Symbolic-regression native fitness (v0.38.0) ──────────────────────────
+// GP fitness (symreg.lisp sr-fitness) evaluated every candidate through the
+// full interpreter per data row — measured ~35% of the symreg benchmark, with
+// sr-pdiv paying a whole extra lambda call per division. `sr-eval-mse`
+// compiles the candidate tree ONCE to an index-resolved node tree, then
+// sweeps the rows natively. Bit-identity contract with the interpreted path:
+// same f64 operations (each op mirrors the builtin exactly — binary `/` is
+// a/b with a "Division by zero" raise, log is ln, sr-pdiv is (if (= b 0) 1
+// (/ a b))), same accumulation order (left fold from 0 in row order, one
+// final division by the row count). Vocabulary it doesn't know (ops added
+// via symreg-ops!, macro building blocks) returns Nil at compile time so the
+// Lisp side can fall back to the eval path — extensibility is untouched.
+
+enum SrNode {
+    Const(f64),
+    Var(usize),
+    Bin(SrBin, Box<SrNode>, Box<SrNode>),
+    Un(SrUn, Box<SrNode>),
+}
+#[derive(Clone, Copy)]
+enum SrBin { Add, Sub, Mul, Div, Pdiv, Expt, Atan2 }
+#[derive(Clone, Copy)]
+enum SrUn { Sin, Cos, Tan, Atan, Exp, Log, Sqrt, Abs }
+
+fn sr_compile(v: &Value, vars: &[String]) -> Option<SrNode> {
+    match v {
+        Value::Number(n) => Some(SrNode::Const(*n)),
+        Value::Symbol(s) => vars.iter().position(|p| p == s).map(SrNode::Var),
+        Value::List(items) => {
+            let op = match items.first()? { Value::Symbol(s) => s.as_str(), _ => return None };
+            let bin = |o: SrBin, items: &[Value]| -> Option<SrNode> {
+                if items.len() != 3 { return None; }
+                Some(SrNode::Bin(o, Box::new(sr_compile(&items[1], vars)?),
+                                    Box::new(sr_compile(&items[2], vars)?)))
+            };
+            let un = |o: SrUn, items: &[Value]| -> Option<SrNode> {
+                if items.len() != 2 { return None; }
+                Some(SrNode::Un(o, Box::new(sr_compile(&items[1], vars)?)))
+            };
+            match op {
+                "+"       => bin(SrBin::Add,   items),
+                "-"       => bin(SrBin::Sub,   items),
+                "*"       => bin(SrBin::Mul,   items),
+                "/"       => bin(SrBin::Div,   items),
+                "sr-pdiv" => bin(SrBin::Pdiv,  items),
+                "expt"    => bin(SrBin::Expt,  items),
+                "atan2"   => bin(SrBin::Atan2, items),
+                "sin"  => un(SrUn::Sin,  items),
+                "cos"  => un(SrUn::Cos,  items),
+                "tan"  => un(SrUn::Tan,  items),
+                "atan" => un(SrUn::Atan, items),
+                "exp"  => un(SrUn::Exp,  items),
+                "log"  => un(SrUn::Log,  items),
+                "sqrt" => un(SrUn::Sqrt, items),
+                "abs"  => un(SrUn::Abs,  items),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn sr_eval(n: &SrNode, args: &[f64]) -> Result<f64, String> {
+    Ok(match n {
+        SrNode::Const(c) => *c,
+        SrNode::Var(i)   => args[*i],
+        SrNode::Un(op, a) => {
+            let x = sr_eval(a, args)?;
+            match op {
+                SrUn::Sin => x.sin(), SrUn::Cos => x.cos(), SrUn::Tan => x.tan(),
+                SrUn::Atan => x.atan(), SrUn::Exp => x.exp(), SrUn::Log => x.ln(),
+                SrUn::Sqrt => x.sqrt(), SrUn::Abs => x.abs(),
+            }
+        }
+        SrNode::Bin(op, a, b) => {
+            let x = sr_eval(a, args)?;
+            let y = sr_eval(b, args)?;
+            match op {
+                SrBin::Add => x + y,
+                SrBin::Sub => x - y,
+                SrBin::Mul => x * y,
+                SrBin::Div => { if y == 0.0 { return Err("Division by zero".into()); } x / y }
+                SrBin::Pdiv => { if y == 0.0 { 1.0 } else { x / y } }
+                SrBin::Expt => x.powf(y),
+                SrBin::Atan2 => x.atan2(y),
+            }
+        }
+    })
+}
+
+fn sr_eval_mse(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 3 { return Err("sr-eval-mse: expected (expr vars data)".into()); }
+    let vars: Vec<String> = match &args[1] {
+        Value::List(l) => l.iter().map(|v| match v {
+            Value::Symbol(s) => Ok(s.clone()),
+            other => Err(format!("sr-eval-mse: vars must be symbols, got {}", other)),
+        }).collect::<Result<_, _>>()?,
+        Value::Nil => vec![],
+        other => return Err(format!("sr-eval-mse: vars must be a list, got {}", other)),
+    };
+    let node = match sr_compile(&args[0], &vars) {
+        Some(n) => n,
+        None => return Ok(Value::Nil), // unknown vocabulary — caller falls back to eval
+    };
+    let data = match &args[2] {
+        Value::List(l) => l,
+        _ => return Err("sr-eval-mse: data must be a non-empty list of rows".into()),
+    };
+    if data.is_empty() { return Err("Division by zero".into()); } // mirrors (/ sum 0)
+    let mut acc = 0.0f64;
+    for row in data.iter() {
+        let (xs, target) = match row {
+            Value::List(r) if r.len() == 2 => {
+                let xs: Vec<f64> = match &r[0] {
+                    Value::List(a) => nums(a)?,
+                    Value::Nil => vec![],
+                    other => return Err(format!("sr-eval-mse: row args must be a list, got {}", other)),
+                };
+                let t = match &r[1] {
+                    Value::Number(n) => *n,
+                    other => return Err(format!("sr-eval-mse: row target must be a number, got {}", other)),
+                };
+                (xs, t)
+            }
+            other => return Err(format!("sr-eval-mse: bad row {}", other)),
+        };
+        if xs.len() != vars.len() {
+            return Err(format!("Arity error: expected {} args, got {}", vars.len(), xs.len()));
+        }
+        let d = sr_eval(&node, &xs)? - target;
+        acc += d * d;
+    }
+    Ok(Value::Number(acc / data.len() as f64))
+}
+
 pub fn apply_value(f: &Value, args: &[Value], eval: &Evaluator) -> Result<Value, String> {
     match f {
         Value::Builtin(_, func) => func(args),
@@ -263,6 +398,8 @@ pub fn setup_builtins(env: &Env) {
     b!("log",  |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Number(n.ln()))}else{Err("log: not a number".into())} });
     b!("max", |args| { let vs=nums(args)?; Ok(Value::Number(vs.iter().cloned().fold(f64::NEG_INFINITY,f64::max))) });
     b!("min", |args| { let vs=nums(args)?; Ok(Value::Number(vs.iter().cloned().fold(f64::INFINITY,f64::min))) });
+    // Native symreg fitness fast path — see the sr_* section above apply_value.
+    b!("sr-eval-mse", sr_eval_mse);
 
     // ── Comparison ────────────────────────────────────────────────────────
     b!("=",  |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a==b)) });

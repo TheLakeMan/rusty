@@ -4,6 +4,15 @@
 ;; symreg_bench.lisp — Rusty side of the 4.1 deliverable benchmark.
 ;; 3 problems × 10 seeds, pop 120 × max 60 generations (symreg defaults).
 ;; Success = training MSE < 1e-10. Mirrored by symreg_gplearn_bench.py.
+;;
+;; v0.38.0 native fitness fast path (sr-eval-mse): total 23.4 s -> 17.1 s
+;; (-27%) on the owner's machine, results bit-identical (expected_symreg.txt
+;; unchanged). Measured split before the change: fitness ~35%, crossover+
+;; mutation ~50%, selection/size ~15% -- the GP operators are the next
+;; ceiling (native sr-get/sr-put/sr-size would be the follow-up lane).
+;; Also measured and REJECTED same day: tail-call frame reuse in the eval
+;; trampoline (fib +-0%, 5M tail loop ~-3%, symreg ~-1.5% -- under the 5%
+;; bar; the v0.33 frame-map pool already captured that win).
 
 (load "symreg.lisp")
 
