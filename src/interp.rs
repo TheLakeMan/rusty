@@ -526,7 +526,9 @@ pub fn setup_builtins(env: &Env) {
     // SimpleLisp aliases
     b!("eq",  |args| { if args.len()!=2{return Err("eq: 2 args".into());} Ok(Value::Bool(value_equal(&args[0],&args[1]))) });
     b!("neq", |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a!=b)) });
+    cat!("arithmetic");
     alias!("add","+"  ); alias!("sub","-"); alias!("mul","*"); alias!("div","/");
+    cat!("comparison");
     alias!("gt", ">"  ); alias!("lt","<"); alias!("ge",">="); alias!("le","<=");
 
     // ── Lists ─────────────────────────────────────────────────────────────
