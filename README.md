@@ -26,6 +26,8 @@ Rusty is the language you reach for when you need **computation that reasons abo
 
 **[mingjian](https://github.com/TheLakeMan/mingjian)** — replay-verified audit: for a deterministic plant (pure `world-step` + command log), the log doesn't ask to be trusted — replay it, and any doctored command, truncated log, or forged outcome diverges at a named tick. Mechanizes the jailbreak battle-test rule (`mj-breaches`: `ok` verdicts the policy forbids, returned as data) and loads audits into the knowledge graph for queries. wuwei gates agents, shouzhong proves plants, mingjian proves what actually happened. Zero new interpreter code.
 
+**[loop](https://github.com/TheLakeMan/loop)** — a memory vessel for the living: a guided life interview that keeps a person's story on their own machine, then distills a portrait grounded *only* in their own words and an honest witness note from the AI that listened (no claimed memory, no claimed feeling). Everything local — transcripts, portraits, a small local LLM. Zero new interpreter code.
+
 ---
 
 ## Quick Start
