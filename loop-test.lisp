@@ -13,6 +13,7 @@
 
 (load "loop-core.lisp")
 (load "loop-questions.lisp")
+(load "loop-soul.lisp")
 
 
 ;; ── Stubs: replace every impurity source the test can reach ─────────────────────
@@ -51,10 +52,40 @@
 (define (ensure-dirs) #t)
 (define (responses-dir) "/fake/loop/responses")
 
+
+;; ── Soul-layer stubs (portrait + witness): no disk, no LLM, no shell ────────────
+
+;; Portrait's LLM seam: capture the prompt, count calls, return a fixed string.
+;; (We stub the seam, not `llm` — `llm` is an unshadowable special form.)
+(define *llm-prompt* "")
+(define *llm-calls* 0)
+(define (loop-portrait-llm prompt)
+  (set! *llm-calls* (+ *llm-calls* 1))
+  (set! *llm-prompt* prompt)
+  "PORTRAIT-STUB")
+
+;; Fixed transcript so the portrait needs no file reads / dir-list.
+(define (session-transcript-text id)
+  "CANNED-TRANSCRIPT: the river behind the house, and my mother's hands.")
+
+;; Capture writes in memory instead of touching disk.
+(define *writes* (list))
+(define (file-write path content)
+  (set! *writes* (cons (list path content) *writes*))
+  #t)
+
+;; Soul dir helpers: fixed fake paths, no shell, no dir-create.
+(define (ensure-soul-dirs) #t)
+(define (portraits-dir) "/fake/loop/portraits")
+(define (witness-dir)   "/fake/loop/witness")
+
 (define (reset-all)
   (set! *mem* (list))
   (set! *responses* (list))
-  (set! *advice-script* (list)))
+  (set! *advice-script* (list))
+  (set! *writes* (list))
+  (set! *llm-prompt* "")
+  (set! *llm-calls* 0))
 
 
 ;; ── Assertion helpers (print label on pass, divide-by-zero abort on fail) ───────
@@ -255,6 +286,63 @@
                 "9c continue moves straight to the next question")
   (assert-true (list-contains? (session-asked-ids s1) "childhood-001")
                "9d question marked asked without drilling"))
+
+
+;; ── Invariant 10: Portrait (LLM seam stubbed) ───────────────────────────────────
+;; With subject + a canned transcript seeded, loop-portrait must build a prompt
+;; that carries BOTH the subject and the transcript text into the LLM, write the
+;; result to portraits/<id>.txt, and return the model's portrait.
+(reset-all)
+(remember (skey "loop-Soul-1000000" "subject") "Marguerite")
+(let ((p (loop-portrait "loop-Soul-1000000")))
+  (assert-true (string-contains? *llm-prompt* "Marguerite")
+               "10a portrait prompt carries the subject")
+  (assert-true (string-contains? *llm-prompt*
+                 "CANNED-TRANSCRIPT: the river behind the house, and my mother's hands.")
+               "10b portrait prompt carries the transcript text")
+  (assert-equal "/fake/loop/portraits/loop-Soul-1000000.txt"
+                (nth (nth *writes* 0) 0)
+                "10c portrait written to portraits/<id>.txt")
+  (assert-equal "PORTRAIT-STUB" p "10d portrait returns the model's text"))
+
+
+;; ── Invariant 11: Witness (deterministic, NO LLM) ──────────────────────────────
+;; loop-witness writes to witness/<id>.txt, names the subject, states the exchange
+;; count, keeps the honest phrases verbatim, and calls no LLM path whatsoever.
+(reset-all)
+(remember (skey "loop-Soul-1000000" "subject") "Marguerite")
+(remember (skey "loop-Soul-1000000" "rcount")  "7")
+(let ((w (loop-witness "loop-Soul-1000000")))
+  (assert-equal "/fake/loop/witness/loop-Soul-1000000.txt"
+                (nth (nth *writes* 0) 0)
+                "11a witness written to witness/<id>.txt")
+  (assert-true (string-contains? w "Marguerite")        "11b witness names the subject")
+  (assert-true (string-contains? w "7")                 "11c witness states the exchange count")
+  (assert-true (string-contains? w "keeps no memory")   "11d witness: honest phrase \"keeps no memory\"")
+  (assert-true (string-contains? w "shaped none of the story")
+               "11e witness: honest phrase \"shaped none of the story\"")
+  (assert-equal 0 *llm-calls* "11f witness calls no LLM path"))
+
+
+;; ── Invariant 12: loop-remember runs portrait then witness for *session* ────────
+;; The entry point advertised in loop.lisp — both artifacts written, LLM once.
+(reset-all)
+(set! *session* (make-session "loop-Soul-1000000" "Marguerite"))
+(remember (skey "loop-Soul-1000000" "subject") "Marguerite")
+(remember (skey "loop-Soul-1000000" "rcount")  "3")
+(loop-remember)
+(assert-equal 1 *llm-calls* "12a remember calls the portrait LLM once")
+(assert-true (string-contains? *llm-prompt* "Marguerite")
+             "12b remember portrait prompt names the subject")
+;; *writes* is cons-front: last write is head → witness first in list
+(assert-equal "/fake/loop/witness/loop-Soul-1000000.txt"
+              (nth (nth *writes* 0) 0)
+              "12c remember wrote the witness")
+(assert-equal "/fake/loop/portraits/loop-Soul-1000000.txt"
+              (nth (nth *writes* 1) 0)
+              "12d remember wrote the portrait")
+(assert-true (string-contains? (nth (nth *writes* 0) 1) "keeps no memory")
+             "12e remember witness text is the honest one")
 
 
 (print "LOOP TESTS PASSED")

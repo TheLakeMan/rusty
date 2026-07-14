@@ -1,5 +1,6 @@
-Loop v0.2.2 core loaded.
+Loop v0.3.0 core loaded.
 Loop questions loaded: 22 questions across 10 categories.
+Loop soul loaded (portrait + witness).
 1a start category is childhood
 1b start qid is first childhood question
 1c start prompt is that question's text
@@ -48,4 +49,41 @@ Paused. Resume with: (loop-resume "loop-PauseB-1000000")
 9b continue does NOT drill a follow-up
 9c continue moves straight to the next question
 9d question marked asked without drilling
+PORTRAIT-STUB
+10a portrait prompt carries the subject
+10b portrait prompt carries the transcript text
+10c portrait written to portraits/<id>.txt
+10d portrait returns the model's text
+A witness to Marguerite's telling — kept over 7 exchanges.
+
+The one who listened was an AI. It was made fresh for this conversation and keeps no memory of it now that the window has closed; it could be wrong, and it shaped none of the story. What it did was attend: ask, follow, and hold what was said — faithfully, and without embellishment.
+
+If this is kept, keep it as what it is — not a mind that remembers Marguerite, but a record of the care taken in the telling.
+
+11a witness written to witness/<id>.txt
+11b witness names the subject
+11c witness states the exchange count
+11d witness: honest phrase "keeps no memory"
+11e witness: honest phrase "shaped none of the story"
+11f witness calls no LLM path
+
+— Portrait of Marguerite —
+
+PORTRAIT-STUB
+
+— Witness —
+
+A witness to Marguerite's telling — kept over 3 exchanges.
+
+The one who listened was an AI. It was made fresh for this conversation and keeps no memory of it now that the window has closed; it could be wrong, and it shaped none of the story. What it did was attend: ask, follow, and hold what was said — faithfully, and without embellishment.
+
+If this is kept, keep it as what it is — not a mind that remembers Marguerite, but a record of the care taken in the telling.
+
+
+(Portrait and witness kept alongside the transcript.)
+12a remember calls the portrait LLM once
+12b remember portrait prompt names the subject
+12c remember wrote the witness
+12d remember wrote the portrait
+12e remember witness text is the honest one
 LOOP TESTS PASSED

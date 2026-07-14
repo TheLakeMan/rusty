@@ -2,10 +2,10 @@
 ;;; SPDX-License-Identifier: AGPL-3.0-or-later
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; loop-core.lisp — Loop Interview Engine v0.2.2
+;; loop-core.lisp — Loop Interview Engine v0.3.0
 ;; ─────────────────────────────────────────────────────────────────────────────
 
-(define LOOP-VERSION "0.2.2")
+(define LOOP-VERSION "0.3.0")
 (define MAX-FOLLOW-UPS 3)
 
 
