@@ -5,7 +5,7 @@
 ;; loop-core.lisp — Loop Interview Engine v0.3.0
 ;; ─────────────────────────────────────────────────────────────────────────────
 
-(define LOOP-VERSION "0.3.0")
+(define LOOP-VERSION "0.3.1")
 (define MAX-FOLLOW-UPS 3)
 
 
@@ -266,7 +266,13 @@
            "  continue  = response complete, move to next question\n"
            "  complete  = person seems done for today\n"
            "One word:")))
-    (let ((raw (llm prompt 0.2 10)))
+    ;; 2000 tokens, not ~10: reasoning models think before the one-word
+    ;; answer lands in content (typically ~270 tokens on a local 9B, but
+    ;; occasionally past 1000), and a too-small budget truncates mid-thought.
+    ;; Non-reasoning models stop right after the word, so headroom is free.
+    ;; An advisor failure (truncation, timeout, server down) must never end
+    ;; a live telling — default to "continue" and let the interview go on.
+    (let ((raw (try-catch (llm prompt 0.2 2000) (e) "continue")))
       (cond
         ((string-contains? raw "follow") "follow-up")
         ((string-contains? raw "complete") "complete")
@@ -281,8 +287,15 @@
     (let ((advice (llm-advise session transcript)))
       (let ((result
         (if (equal? advice "complete")
-          (list (session-set session "status" "complete")
-                (loop-closing session))
+          ;; Their last words still belong in the transcript — save before
+          ;; closing, or the response that ended the telling is lost.
+          (begin
+            (save-response (session-id session)
+                           (session-current-qid session)
+                           (session-follow-up-depth session)
+                           transcript)
+            (list (session-set session "status" "complete")
+                  (loop-closing session)))
           (advance-session session transcript advice))))
         (save-session (nth result 0))
         result))))

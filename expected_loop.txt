@@ -1,4 +1,4 @@
-Loop v0.3.0 core loaded.
+Loop v0.3.1 core loaded.
 Loop questions loaded: 22 questions across 10 categories.
 Loop soul loaded (portrait + witness).
 1a start category is childhood
@@ -36,6 +36,8 @@ Paused. Resume with: (loop-resume "loop-PauseB-1000000")
 6b-6 pending-question at depth 2 is the mid follow-up
 7a status is complete
 7b message equals loop-closing output
+7c final response is saved
+7d final words kept verbatim
 8a id
 8b subject
 8c started-at

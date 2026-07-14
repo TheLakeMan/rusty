@@ -246,7 +246,10 @@
        (s1 (nth r1 0))
        (msg (nth r1 1)))
   (assert-equal "complete" (session-status s1) "7a status is complete")
-  (assert-equal (loop-closing s1) msg "7b message equals loop-closing output"))
+  (assert-equal (loop-closing s1) msg "7b message equals loop-closing output")
+  ;; Their last words must reach the transcript — completing must not drop them.
+  (assert-equal 1 (length *responses*) "7c final response is saved")
+  (assert-equal "I'm tired now" (nth (nth *responses* 0) 2) "7d final words kept verbatim"))
 
 
 ;; ── Invariant 8: save/load fidelity (field-by-field) ────────────────────────────

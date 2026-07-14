@@ -29,6 +29,7 @@ struct ResponseMessage {
 #[derive(Deserialize)]
 struct ChatChoice {
     message: ResponseMessage,
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -94,20 +95,23 @@ impl Evaluator {
             .await
             .map_err(|e| format!("LLM response parse error: {}", e))?;
 
-        response.choices.first()
-            .map(|c| {
-                // Use content if non-empty, fall back to reasoning_content
-                let content = c.message.content.as_deref().unwrap_or("").trim();
-                if !content.is_empty() {
-                    content.to_string()
-                } else {
-                    c.message.reasoning_content.clone()
-                        .unwrap_or_default()
-                        .trim()
-                        .to_string()
-                }
-            })
-            .ok_or_else(|| "No response from LLM".to_string())
+        let choice = response.choices.first()
+            .ok_or_else(|| "No response from LLM".to_string())?;
+        let content = choice.message.content.as_deref().unwrap_or("").trim();
+        if !content.is_empty() {
+            return Ok(content.to_string());
+        }
+        // Empty content = a reasoning model spent the whole reply thinking.
+        // If it stopped naturally the reasoning tail may hold the answer, but
+        // if it hit max_tokens it's truncated chain-of-thought — refusing it
+        // beats handing raw thinking to the caller as if it were the reply.
+        if choice.finish_reason.as_deref() == Some("length") {
+            return Err("LLM hit max_tokens while still reasoning (no final content) — raise the token budget".to_string());
+        }
+        Ok(choice.message.reasoning_content.clone()
+            .unwrap_or_default()
+            .trim()
+            .to_string())
     }
 
     pub fn eval_all(&self, ast: &[Expr], env: &Env) -> Result<Value, String> {

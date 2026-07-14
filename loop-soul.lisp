@@ -47,9 +47,12 @@
 ;; The LLM call is isolated in its own seam so the golden test can stub it:
 ;; `llm` is a special form (matched before any env lookup in eval.rs), so a
 ;; user `define` cannot shadow `(llm ...)` directly — the same reason loop-core
-;; wraps it as `llm-advise`. This seam calls (llm prompt 0.7 800) verbatim.
+;; wraps it as `llm-advise`. This seam calls (llm prompt 0.7 3000) verbatim —
+;; sized so a reasoning model can finish thinking AND write the portrait
+;; (non-reasoning models stop early; unused budget costs nothing). On slow
+;; hardware raise RUSTY_LLM_TIMEOUT_SECS (default 120s) for live portraits.
 (define (loop-portrait-llm prompt)
-  (llm prompt 0.7 800))
+  (llm prompt 0.7 3000))
 
 (define (loop-portrait id)
   (let* ((subj-raw (recall (skey id "subject")))
@@ -98,7 +101,15 @@
       (print "")
       (print (str "— Portrait of " (session-subject *session*) " —"))
       (print "")
-      (loop-portrait id)
+      ;; A failed portrait (LLM truncation, timeout, server down) must not
+      ;; cost the witness or the transcripts — keep what can be kept and
+      ;; leave the portrait retryable via (loop-remember).
+      (try-catch
+        (loop-portrait id)
+        (e)
+        (begin
+          (print (str "The portrait could not be kept this time: " e))
+          (print "(Their words are safe in the transcript — run (loop-remember) again to retry.)")))
       (print "")
       (print "— Witness —")
       (print "")
