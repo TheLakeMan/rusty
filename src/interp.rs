@@ -224,6 +224,86 @@ fn sr_eval_mse(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Number(acc / data.len() as f64))
 }
 
+// ── Native GP tree surgery (v0.39.0) ──────────────────────────────────────
+// symreg.lisp's crossover/mutation is preorder-indexed list surgery: sr-size
+// counts nodes, sr-get returns the subtree at a preorder index, sr-put
+// rebuilds the tree with a subtree replaced. Interpreted, each is a recursive
+// tree-walk through the trampoline — and sr-get/sr-put recompute sr-size on
+// sibling subtrees as they descend, so a single operation is ~O(n^2) in tree
+// size (~50% of the symreg benchmark, measured). These natives preserve the
+// exact node count and preorder indexing (a "node" is one list cell or atom;
+// the operator symbol at a list's head belongs to its parent node and is not
+// separately indexable — sr-size only counts the arguments), so PRNG draw
+// order and discovered equations stay bit-identical. Purely structural: any
+// tree works regardless of vocabulary, so there's no eval fallback here.
+
+fn sr_size_v(v: &Value) -> usize {
+    match v {
+        Value::List(items) if !items.is_empty() =>
+            1 + items[1..].iter().map(sr_size_v).sum::<usize>(),
+        _ => 1,
+    }
+}
+
+fn sr_get_v(t: &Value, i: usize) -> Value {
+    if i == 0 { return t.clone(); }
+    match t {                                   // descend into (cdr t) at i-1
+        Value::List(items) => sr_get_in(&items[1..], i - 1),
+        _ => Value::Nil,                        // out of range (caller stays in-range)
+    }
+}
+fn sr_get_in(ts: &[Value], i: usize) -> Value {
+    if ts.is_empty() { return Value::Nil; }
+    let s = sr_size_v(&ts[0]);
+    if i < s { sr_get_v(&ts[0], i) } else { sr_get_in(&ts[1..], i - s) }
+}
+
+fn sr_put_v(t: &Value, i: usize, sub: &Value) -> Value {
+    if i == 0 { return sub.clone(); }
+    match t {                                   // cons (car t) (sr-put-in (cdr t) ...)
+        Value::List(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            out.push(items[0].clone());
+            sr_put_in(&items[1..], i - 1, sub, &mut out);
+            list(out)
+        }
+        _ => sub.clone(),                       // out of range (caller stays in-range)
+    }
+}
+fn sr_put_in(ts: &[Value], i: usize, sub: &Value, out: &mut Vec<Value>) {
+    if ts.is_empty() { return; }
+    let s = sr_size_v(&ts[0]);
+    if i < s {                                  // replace within car ts, keep (cdr ts)
+        out.push(sr_put_v(&ts[0], i, sub));
+        out.extend(ts[1..].iter().cloned());
+    } else {                                    // keep car ts, recurse into (cdr ts)
+        out.push(ts[0].clone());
+        sr_put_in(&ts[1..], i - s, sub, out);
+    }
+}
+
+fn sr_index(v: &Value, who: &str) -> Result<usize, String> {
+    match v {
+        Value::Number(n) if *n >= 0.0 => Ok(*n as usize),
+        other => Err(format!("{}: index must be a non-negative number, got {}", who, other)),
+    }
+}
+
+fn sr_size(args: &[Value]) -> Result<Value, String> {
+    match args.first() {
+        Some(v) => Ok(Value::Number(sr_size_v(v) as f64)),
+        None => Err("sr-size: expected (tree)".into()),
+    }
+}
+fn sr_get(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 2 { return Err("sr-get: expected (tree index)".into()); }
+    Ok(sr_get_v(&args[0], sr_index(&args[1], "sr-get")?))
+}
+fn sr_put(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 3 { return Err("sr-put: expected (tree index subtree)".into()); }
+    Ok(sr_put_v(&args[0], sr_index(&args[1], "sr-put")?, &args[2]))
+}
+
 pub fn apply_value(f: &Value, args: &[Value], eval: &Evaluator) -> Result<Value, String> {
     match f {
         Value::Builtin(_, func) => func(args),
@@ -400,6 +480,10 @@ pub fn setup_builtins(env: &Env) {
     b!("min", |args| { let vs=nums(args)?; Ok(Value::Number(vs.iter().cloned().fold(f64::INFINITY,f64::min))) });
     // Native symreg fitness fast path — see the sr_* section above apply_value.
     b!("sr-eval-mse", sr_eval_mse);
+    // Native GP tree surgery (crossover/mutation hot path) — same section.
+    b!("sr-size", sr_size);
+    b!("sr-get",  sr_get);
+    b!("sr-put",  sr_put);
 
     // ── Comparison ────────────────────────────────────────────────────────
     b!("=",  |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a==b)) });

@@ -53,20 +53,15 @@
       (cons (sr-random-tree vars depth) (sr-random-args vars depth (- n 1)))))
 
 ;; ── Tree surgery (preorder indexing) ─────────────────────────────────────
-(define (sr-size t)
-  (if (pair? t) (+ 1 (sum (map sr-size (cdr t)))) 1))
-(define (sr-get t i)
-  (if (= i 0) t (sr-get-in (cdr t) (- i 1))))
-(define (sr-get-in ts i)
-  (let ((s (sr-size (car ts))))
-    (if (< i s) (sr-get (car ts) i) (sr-get-in (cdr ts) (- i s)))))
-(define (sr-put t i sub)
-  (if (= i 0) sub (cons (car t) (sr-put-in (cdr t) (- i 1) sub))))
-(define (sr-put-in ts i sub)
-  (let ((s (sr-size (car ts))))
-    (if (< i s)
-        (cons (sr-put (car ts) i sub) (cdr ts))
-        (cons (car ts) (sr-put-in (cdr ts) (- i s) sub)))))
+;; sr-size (node count), sr-get (subtree at a preorder index), and sr-put
+;; (rebuild with a subtree replaced) are native builtins (v0.39.0, interp.rs)
+;; — the crossover/mutation hot path. Interpreted they were ~O(n^2) per op
+;; (sr-get/sr-put recomputed sr-size on each sibling subtree). The natives
+;; preserve the exact node count and preorder indexing, so PRNG draw order and
+;; discovered equations stay bit-identical. Reference definitions:
+;;   (define (sr-size t) (if (pair? t) (+ 1 (sum (map sr-size (cdr t)))) 1))
+;;   (sr-get t i)  => subtree at preorder index i (0 = whole tree)
+;;   (sr-put t i s) => t with the subtree at index i replaced by s
 
 ;; ── Fitness: MSE, with NaN → hard penalty ────────────────────────────────
 ;; With pdiv total, candidates can't raise; extreme values can still

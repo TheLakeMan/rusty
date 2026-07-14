@@ -5,14 +5,17 @@
 ;; 3 problems × 10 seeds, pop 120 × max 60 generations (symreg defaults).
 ;; Success = training MSE < 1e-10. Mirrored by symreg_gplearn_bench.py.
 ;;
-;; v0.38.0 native fitness fast path (sr-eval-mse): total 23.4 s -> 17.1 s
-;; (-27%) on the owner's machine, results bit-identical (expected_symreg.txt
-;; unchanged). Measured split before the change: fitness ~35%, crossover+
-;; mutation ~50%, selection/size ~15% -- the GP operators are the next
-;; ceiling (native sr-get/sr-put/sr-size would be the follow-up lane).
-;; Also measured and REJECTED same day: tail-call frame reuse in the eval
-;; trampoline (fib +-0%, 5M tail loop ~-3%, symreg ~-1.5% -- under the 5%
-;; bar; the v0.33 frame-map pool already captured that win).
+;; v0.38.0 native fitness fast path (sr-eval-mse): -27% (measured split of the
+;; remainder: fitness ~35%, crossover+mutation ~50%, selection/size ~15%).
+;; v0.39.0 native GP tree surgery (sr-size/sr-get/sr-put builtins): the tree
+;; ops were ~O(n^2) per crossover/mutation interpreted (sr-get/sr-put recompute
+;; sr-size on each sibling subtree) and are hit again by the selection score
+;; and both parsimony guards -- so the natives beat the 50% estimate by a lot.
+;; Same machine as the 0.38.0 run: 16.7 s -> 3.2 s (-81%), results bit-identical
+;; (expected_symreg.txt unchanged). Cumulative from the pre-0.38 baseline
+;; (~23.4 s -> 3.2 s, ~7.3x). Also measured and REJECTED (0.38.0): tail-call
+;; frame reuse in the eval trampoline (fib +-0%, 5M tail loop ~-3%, symreg
+;; ~-1.5% -- under the 5% bar; the v0.33 frame-map pool already owns that win).
 
 (load "symreg.lisp")
 
