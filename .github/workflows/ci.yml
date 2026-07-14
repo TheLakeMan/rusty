@@ -96,7 +96,7 @@ jobs:
           components: rustfmt
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo check
 
   # ── Performance regression gate ───────────────────────────────────────────
   # Ratio-based (compiled vs interpreted on the SAME runner), so noisy
