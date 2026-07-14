@@ -6,6 +6,19 @@ use crate::env::{Env, EnvFrame, Value, list, cons};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+/// Every special-form / built-in-syntax name the evaluator recognizes as a
+/// call head. Single source of truth — the LSP, the command registry, and
+/// (help) all read this. Keep in sync with the `match head.as_str()` arms in
+/// `eval` (the coverage test will flag a special form missing from the registry).
+pub const SPECIAL_FORMS: &[&str] = &[
+    "define", "def", "lambda", "fn", "λ", "set!", "set", "let", "let*",
+    "letrec", "letrec*", "do", "if", "cond", "when", "unless", "and", "or",
+    "begin", "match", "try-catch", "load", "load-relative", "quote",
+    "quasiquote", "unquote", "unquote-splicing", "eval", "eval-when",
+    "defmacro", "define-macro", "defrust", "defrust*", "checkpoint", "deftool",
+    "tool-call", "list-tools", "react-loop", "llm",
+];
+
 #[derive(Serialize, Deserialize)]
 struct ChatMessage {
     role: String,

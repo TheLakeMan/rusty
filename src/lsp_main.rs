@@ -36,15 +36,6 @@ use serde_json::{json, Value as J};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 
-const SPECIAL_FORMS: &[&str] = &[
-    "define", "def", "lambda", "set!", "set", "let", "let*", "letrec", "letrec*",
-    "do", "if", "cond", "when", "unless", "and", "or", "begin", "match",
-    "try-catch", "load", "load-relative", "quote", "quasiquote", "unquote",
-    "unquote-splicing", "eval", "eval-when", "defmacro", "define-macro",
-    "defrust", "defrust*", "checkpoint", "deftool", "tool-call", "list-tools",
-    "react-loop", "llm",
-];
-
 fn read_message(stdin: &mut impl Read) -> Option<J> {
     // Content-Length: N\r\n\r\n{...}
     let mut header = Vec::new();
@@ -188,7 +179,7 @@ fn main() {
             "textDocument/completion" => {
                 let mut names: Vec<String> =
                     genv.borrow().vars.keys().cloned().collect();
-                names.extend(SPECIAL_FORMS.iter().map(|s| s.to_string()));
+                names.extend(crate::eval::SPECIAL_FORMS.iter().map(|s| s.to_string()));
                 names.sort();
                 names.dedup();
                 let items: Vec<J> = names.into_iter()
@@ -205,7 +196,7 @@ fn main() {
                     .and_then(|word| {
                         let v = genv.borrow().vars.get(&word).cloned();
                         v.map(|v| format!("**{}** — {}", word, describe(&v)))
-                            .or_else(|| SPECIAL_FORMS.contains(&word.as_str())
+                            .or_else(|| crate::eval::SPECIAL_FORMS.contains(&word.as_str())
                                 .then(|| format!("**{}** — special form (see docs/SPEC.md §6)", word)))
                     });
                 match hover {
