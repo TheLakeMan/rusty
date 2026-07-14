@@ -8,6 +8,8 @@
 ;; Reuses loop-core helpers: loop-home, responses-dir, skey, recall, nil?, str,
 ;; foldl, filter, string-contains?, and the native builtins file-read/file-write/
 ;; dir-create/dir-list (dir-list returns bare, sorted file names — verified).
+;;
+;; End-of-telling entry: (loop-remember). Hermetic locks: loop-test invariants 10–12.
 ;; ─────────────────────────────────────────────────────────────────────────────
 
 
