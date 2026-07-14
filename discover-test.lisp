@@ -1,0 +1,25 @@
+;;; discover-test.lisp — golden test for the command registry + discovery.
+;;; Copyright (c) 2026 Nicholas Vermeulen
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
+;;; NO LLM, deterministic. Exercises (command-registry) and its shape.
+(define reg (command-registry))
+(define (kind-of name)
+  (let loop ((r reg))
+    (cond ((null? r) 'not-found)
+          ((string=? (car (car r)) name) (cadr (car r)))
+          (else (loop (cdr r))))))
+(define (cat-of name)
+  (let loop ((r reg))
+    (cond ((null? r) 'not-found)
+          ((string=? (car (car r)) name) (nth (car r) 3))
+          (else (loop (cdr r))))))
+(println (list 'total-is-plausible (> (length reg) 250)))
+(println (list 'row-arity (length (car reg))))
+(println (list 'map-kind (kind-of "map")))
+(println (list 'plus-kind (kind-of "+")))
+(println (list 'plus-cat (cat-of "+")))
+(println (list 'if-kind (kind-of "if")))
+(println (list 'defmacro-kind (kind-of "defmacro")))
+(println (list 'command-registry-kind (kind-of "command-registry")))
+(println (list 'kg-add-cat (cat-of "kg-add!")))
+(println "discover-test: done")

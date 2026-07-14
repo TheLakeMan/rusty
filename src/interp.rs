@@ -9,6 +9,21 @@ use crate::parser::Parser;
 use crate::env::{Env, EnvFrame, Value, list, cons};
 use crate::eval::Evaluator;
 
+// ── Command categories (for the command registry / discovery) ─────────────
+// name → category, populated by cat!() markers during setup_builtins and by
+// the `categorize!` builtin from std.lisp. Static per thread; overwriting on a
+// fresh env setup is idempotent. Read by the `(command-registry)` special form.
+thread_local! {
+    static CATEGORIES: std::cell::RefCell<rustc_hash::FxHashMap<String, String>> =
+        std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+}
+pub fn set_category(name: &str, cat: &str) {
+    CATEGORIES.with(|c| { c.borrow_mut().insert(name.to_string(), cat.to_string()); });
+}
+pub fn category_of(name: &str) -> Option<String> {
+    CATEGORIES.with(|c| c.borrow().get(name).cloned())
+}
+
 // ── Core run helper ───────────────────────────────────────────────────────
 
 pub fn run_code(input: &str, env: &Env, eval: &Evaluator) -> Result<Value, String> {
@@ -426,20 +441,27 @@ fn tensor_binop2(args: &[Value], name: &str, f: fn(f64, f64) -> f64) -> Result<V
 // ── Builtins ──────────────────────────────────────────────────────────────
 
 pub fn setup_builtins(env: &Env) {
+    // Current category for the command registry; cat!("…") sets it at each
+    // section boundary, and b!/alias! tag every command they register with it.
+    let cur_cat = std::cell::Cell::new("other");
+    macro_rules! cat { ($c:expr) => { cur_cat.set($c); }; }
     macro_rules! b {
-        ($name:expr, $f:expr) => {
+        ($name:expr, $f:expr) => {{
             EnvFrame::set(env, $name.to_string(), Value::Builtin($name, $f));
-        };
+            crate::interp::set_category($name, cur_cat.get());
+        }};
     }
     macro_rules! alias {
-        ($from:expr, $to:expr) => {
+        ($from:expr, $to:expr) => {{
             if let Some(v) = EnvFrame::get(env, $to) {
                 EnvFrame::set(env, $from.to_string(), v);
+                crate::interp::set_category($from, cur_cat.get());
             }
-        };
+        }};
     }
 
     // ── Arithmetic ────────────────────────────────────────────────────────
+    cat!("arithmetic");
     b!("+", |args| {
         if args.is_empty() { return Ok(Value::Number(0.0)); }
         Ok(Value::Number(nums(args)?.iter().sum()))
@@ -486,6 +508,7 @@ pub fn setup_builtins(env: &Env) {
     b!("sr-put",  sr_put);
 
     // ── Comparison ────────────────────────────────────────────────────────
+    cat!("comparison");
     b!("=",  |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a==b)) });
     b!("<",  |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a<b))  });
     b!(">",  |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a>b))  });
@@ -507,6 +530,7 @@ pub fn setup_builtins(env: &Env) {
     alias!("gt", ">"  ); alias!("lt","<"); alias!("ge",">="); alias!("le","<=");
 
     // ── Lists ─────────────────────────────────────────────────────────────
+    cat!("lists");
     b!("cons", |args| {
         if args.len()!=2{return Err("cons: 2 args".into());}
         Ok(cons(args[0].clone(), args[1].clone()))
@@ -643,6 +667,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Type predicates ───────────────────────────────────────────────────
+    cat!("types");
     b!("number?",    |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Number(_))))));
     b!("string?",    |args| Ok(Value::Bool(matches!(args.first(), Some(Value::String(_))))));
     b!("boolean?",   |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Bool(_))))));
@@ -677,6 +702,7 @@ pub fn setup_builtins(env: &Env) {
     b!("tensor?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tensor{..})))));
 
     // ── Strings ───────────────────────────────────────────────────────────
+    cat!("strings");
     b!("string-length",  |args| {
         if let Some(Value::String(s))=args.first(){Ok(Value::Number(s.chars().count() as f64))}
         else{Err("string-length: not a string".into())}
@@ -748,6 +774,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── format ~a ~s ~% ~~ ────────────────────────────────────────────────
+    cat!("strings");
     b!("format", |args| {
         if args.is_empty() { return Err("format: needs a template string".into()); }
         let tmpl = match &args[0] { Value::String(s)=>s.clone(), _=>return Err("format: first arg must be a string".into()) };
@@ -770,6 +797,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── gensym ────────────────────────────────────────────────────────────
+    cat!("macros");
     b!("gensym", |args| {
         let prefix = match args.first() {
             Some(Value::String(s))|Some(Value::Symbol(s)) => s.clone(),
@@ -779,6 +807,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Symbolic differentiation ──────────────────────────────────────────
+    cat!("math");
     b!("grad", |args| {
         match args.first() {
             Some(Value::Lambda { params, rest, body, env }) => {
@@ -795,6 +824,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Native tensors (Phase 3.1) ──────────────────────────────────────────
+    cat!("tensors");
     b!("tensor", |args| {
         let v = args.first().ok_or("tensor: (tensor nested-list)")?;
         let (data, shape) = nested_to_tensor(v)?;
@@ -914,6 +944,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Flow-sensitive static type checking ────────────────────────────────
+    cat!("checkers");
     // Called by define-typed's expansion (std.lisp) to record a declared
     // signature so check-types can see through user-defined calls.
     // 'unknown is accepted for unannotated params/returns.
@@ -981,6 +1012,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── eval-string ─────────────────────────────────────────────────────────
+    cat!("eval");
     // Parses and evaluates a string of Rusty code in a FRESH environment
     // (builtins + stdlib, not the caller's definitions). Exists for the
     // proof-by-checker loop (std.lisp), where LLM-proposed candidate code
@@ -999,6 +1031,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Bounded exhaustive checking ─────────────────────────────────────────
+    cat!("checkers");
     // (check-exhaustive property '((domain1...) (domain2...) ...))
     // Runs `property` on EVERY combination of the given finite domains (one
     // domain list per parameter) and returns 'verified, or a list of
@@ -1126,6 +1159,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Effect tracking ─────────────────────────────────────────────────────
+    cat!("checkers");
     b!("check-effects", |args| {
         match args.first() {
             Some(Value::Lambda { body, .. }) | Some(Value::Tool { body, .. }) => {
@@ -1148,6 +1182,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Graph IR ───────────────────────────────────────────────────────────
+    cat!("graph");
     b!("graph-ir", |args| {
         match args.first() {
             Some(Value::Lambda { params, body, .. }) => {
@@ -1277,6 +1312,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Execution tracing (Phase 3.2) ─────────────────────────────────────
+    cat!("trace");
     b!("trace-on", |_| { crate::trace::clear(); crate::trace::set_enabled(true); Ok(Value::Nil) });
     b!("trace-off", |_| { crate::trace::set_enabled(false); Ok(Value::Nil) });
     b!("trace-clear", |_| { crate::trace::clear(); Ok(Value::Nil) });
@@ -1302,6 +1338,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Macro profiler ───────────────────────────────────────────────────
+    cat!("macros");
     b!("macro-profile-on", |_| { crate::eval::macro_profile::set_enabled(true); Ok(Value::Nil) });
     b!("macro-profile-off", |_| { crate::eval::macro_profile::set_enabled(false); Ok(Value::Nil) });
     b!("macro-profile-reset", |_| { crate::eval::macro_profile::reset(); Ok(Value::Nil) });
@@ -1315,6 +1352,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Math extras ───────────────────────────────────────────────────────
+    cat!("math");
     b!("gcd", |args| {
         fn gcd(a: u64, b: u64) -> u64 { if b==0{a}else{gcd(b,a%b)} }
         let vs = nums(args)?;
@@ -1323,6 +1361,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── JSON ──────────────────────────────────────────────────────────────
+    cat!("json");
     b!("json-encode", |args| {
         if args.len()!=1{return Err("json-encode: 1 arg".into());}
         Ok(Value::String(json_encode(&args[0])))
@@ -1334,6 +1373,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Model serialization (Phase 3.1) ──────────────────────────────────
+    cat!("serialization");
     // Rusty's own model format: a versioned JSON envelope over *data* values
     // (numbers, strings, bools, symbols, lists, tensors) via serde_json.
     // Symbols and tensors are tagged objects so they round-trip losslessly —
@@ -1375,6 +1415,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Time ─────────────────────────────────────────────────────────────
+    cat!("time");
     b!("now-micros", |_| {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .map(|d| Value::Number(d.as_micros() as f64))
@@ -1382,6 +1423,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── I/O ───────────────────────────────────────────────────────────────
+    cat!("io");
     b!("display", |args| {
         for a in args { match a { Value::String(s)=>print!("{}",s), other=>print!("{}",other) } }
         Ok(Value::Nil)
@@ -1392,6 +1434,7 @@ pub fn setup_builtins(env: &Env) {
     b!("error",   |args| { Err(args.iter().map(|v| print_repr(v)).collect::<Vec<_>>().join(" ")) });
 
     // ── System / shell ────────────────────────────────────────────────────
+    cat!("system");
     b!("shell", |args| {
         if args.is_empty() { return Err("shell: needs a command string".into()); }
         let cmd = match &args[0] {
@@ -1415,6 +1458,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Filesystem (all classified effectful in effect_check.rs) ─────────
+    cat!("filesystem");
     // These existed only as agent-tool NAMES until 0.26.0 — the tool
     // bodies called builtins that were never implemented, and since tool
     // bodies don't run at registration, nothing noticed.
@@ -1483,6 +1527,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Knowledge graph (Phase 1.3, self-built — src/kg.rs) ──────────────
+    cat!("kg");
     b!("kg-clear!", |_| { crate::kg::clear(); Ok(Value::Bool(true)) });
     b!("kg-add!", |args| {
         match (args.first(), args.get(1), args.get(2)) {
@@ -1515,6 +1560,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Tool predicate ────────────────────────────────────────────────────
+    cat!("tools");
     b!("tool?", |args| Ok(Value::Bool(matches!(args.first(), Some(Value::Tool{..})))));
     b!("tool-name", |args| {
         match args.first() {
@@ -1524,6 +1570,7 @@ pub fn setup_builtins(env: &Env) {
     });
 
     // ── Memory system ─────────────────────────────────────────────────────
+    cat!("memory");
     // Stored as ~/.rusty/memory.lisp — plain Lisp defines, human readable
     b!("remember", |args| {
         if args.len() < 2 { return Err("remember: (remember key value)".into()); }
@@ -1616,6 +1663,24 @@ pub fn setup_builtins(env: &Env) {
     b!("nil",     |_| Ok(Value::Nil));
 
     // ── Help ──────────────────────────────────────────────────────────────
+    cat!("meta");
+    // (categorize! 'category '(name1 name2 ...)) — tag std.lisp functions so
+    // the command registry can group them. Writes into the CATEGORIES table.
+    b!("categorize!", |args| {
+        let cat = match args.first() {
+            Some(Value::Symbol(s)) => s.clone(),
+            _ => return Err("categorize!: first arg must be a category symbol".into()),
+        };
+        match args.get(1) {
+            Some(Value::List(names)) => {
+                for n in names.iter() {
+                    if let Value::Symbol(s) = n { crate::interp::set_category(s, &cat); }
+                }
+                Ok(Value::Nil)
+            }
+            _ => Err("categorize!: second arg must be a list of name symbols".into()),
+        }
+    });
     b!("help", |_| {
         println!("Rusty v{} — Lisp in Rust  |  (help) for this message", env!("CARGO_PKG_VERSION"));
         println!("Special: define def set set! lambda if cond let let* letrec begin");

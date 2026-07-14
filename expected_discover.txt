@@ -1,0 +1,10 @@
+(total-is-plausible #t)
+(row-arity 4)
+(map-kind builtin)
+(plus-kind builtin)
+(plus-cat arithmetic)
+(if-kind special-form)
+(defmacro-kind special-form)
+(command-registry-kind special-form)
+(kg-add-cat kg)
+discover-test: done

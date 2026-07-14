@@ -15,8 +15,8 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "letrec", "letrec*", "do", "if", "cond", "when", "unless", "and", "or",
     "begin", "match", "try-catch", "load", "load-relative", "quote",
     "quasiquote", "unquote", "unquote-splicing", "eval", "eval-when",
-    "defmacro", "define-macro", "defrust", "defrust*", "checkpoint", "deftool",
-    "tool-call", "list-tools", "react-loop", "llm",
+    "defmacro", "define-macro", "defrust", "defrust*", "checkpoint",
+    "command-registry", "deftool", "tool-call", "list-tools", "react-loop", "llm",
 ];
 
 #[derive(Serialize, Deserialize)]
@@ -438,6 +438,48 @@ impl Evaluator {
                                     _ => return Err("checkpoint: filename must be a string".into()),
                                 };
                                 return crate::checkpoint::write_checkpoint(&path, &env);
+                            }
+
+                            // ── (command-registry) → rows of every command ──
+                            "command-registry" => {
+                                // Walk to the root (global) frame.
+                                let mut root = env.clone();
+                                loop {
+                                    let next = root.borrow().parent.clone();
+                                    match next { Some(p) => root = p, None => break }
+                                }
+                                let mut rows: Vec<Value> = Vec::new();
+                                for (name, val) in root.borrow().vars.iter() {
+                                    let (kind, sig) = match val {
+                                        Value::Builtin(..) => ("builtin", String::new()),
+                                        Value::Lambda { params, rest, .. } =>
+                                            ("function", fmt_sig(name, params, rest)),
+                                        Value::Macro { params, rest, .. } =>
+                                            ("macro", fmt_sig(name, params, rest)),
+                                        Value::Tool { params, .. } =>
+                                            ("function", fmt_sig(name, params, &None)),
+                                        Value::Native { .. } | Value::NativeGrad { .. } =>
+                                            ("function", String::new()),
+                                        _ => continue, // plain data bindings aren't commands
+                                    };
+                                    let cat = crate::interp::category_of(name)
+                                        .unwrap_or_else(|| "other".to_string());
+                                    rows.push(crate::env::list(vec![
+                                        Value::String(name.clone()),
+                                        Value::Symbol(kind.to_string()),
+                                        Value::String(sig),
+                                        Value::Symbol(cat),
+                                    ]));
+                                }
+                                for sf in crate::eval::SPECIAL_FORMS {
+                                    rows.push(crate::env::list(vec![
+                                        Value::String((*sf).to_string()),
+                                        Value::Symbol("special-form".to_string()),
+                                        Value::String(String::new()),
+                                        Value::Symbol("special-form".to_string()),
+                                    ]));
+                                }
+                                return Ok(crate::env::list(rows));
                             }
 
                             // ── (try-catch body (err) handler) ──────────
@@ -1075,6 +1117,17 @@ fn sym_name(e: &Expr, ctx: &str) -> Result<String, String> {
         Expr::Symbol(s) => Ok(s.clone()),
         _ => Err(format!("{}: expected a symbol", ctx)),
     }
+}
+
+/// Format a callable's signature string, e.g. "(map fn lst)" or
+/// "(foo a b . rest)". Used by the command registry.
+fn fmt_sig(name: &str, params: &[String], rest: &Option<String>) -> String {
+    let mut s = String::from("(");
+    s.push_str(name);
+    for p in params { s.push(' '); s.push_str(p); }
+    if let Some(r) = rest { s.push_str(" . "); s.push_str(r); }
+    s.push(')');
+    s
 }
 
 fn parse_params(exprs: &[Expr]) -> Result<(Vec<String>, Option<String>), String> {
