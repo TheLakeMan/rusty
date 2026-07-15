@@ -58,7 +58,9 @@ cargo install --path . --bin rusty --root ~/.local
 
 The binary is self-contained (stdlib embedded). The `defrust` / `graph-compile`
 JIT features shell out to `rustc`, so they additionally need a Rust toolchain
-on PATH — everything else, including all three Law quickstarts, runs without one.
+on PATH — everything else runs without one, including the Law I and III
+quickstarts (Law II's proof-transfer step compiles the control law with
+`defrust`, so it needs `rustc` — verified cold-cache both ways).
 
 ```bash
 # Build

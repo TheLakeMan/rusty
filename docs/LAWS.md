@@ -43,6 +43,7 @@ gated: a command outside the proven envelope is refused before it actuates.
 # rusty on PATH (see ../README.md — Install), then:
 git clone https://github.com/TheLakeMan/shouzhong && cd shouzhong
 rusty shouzhong-test.lisp      # offline — no LLM (or ./run_tests.sh for all three plants)
+# needs rustc on PATH too: the proof-transfer step compiles the control law (defrust)
 ```
 
 ```
