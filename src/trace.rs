@@ -44,6 +44,9 @@ thread_local! {
     // command actually invoked, so the suite can prove which of the ~336
     // commands really ran. Off by default (RUSTY_COVERAGE) — a normal run
     // pays one thread-local bool read per call form and nothing else.
+    // Caveat: this records the NAME in call position, not the resolved value —
+    // a same-named local binding satisfies it, so coverage proves the name was
+    // called somewhere, not that the builtin's implementation executed.
     static COV_ON:  Cell<bool> = Cell::new(false);
     static COVERED: RefCell<std::collections::HashSet<String>> =
         RefCell::new(std::collections::HashSet::new());

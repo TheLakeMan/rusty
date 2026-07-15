@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 /// Every special-form / built-in-syntax name the evaluator recognizes as a
 /// call head. Single source of truth — the LSP, the command registry, and
 /// (help) all read this. Keep in sync with the `match head.as_str()` arms in
-/// `eval` (the coverage test will flag a special form missing from the registry).
+/// `eval` — sync is MANUAL and unverified: an arm missing from this list is
+/// invisible to the registry, discovery, and the coverage ratchet alike (the
+/// ratchet only enforces the reverse direction — every listed name must be
+/// exercised or allowlisted).
 pub const SPECIAL_FORMS: &[&str] = &[
     "define", "def", "lambda", "fn", "λ", "set!", "set", "let", "let*",
     "letrec", "letrec*", "do", "if", "cond", "when", "unless", "and", "or",
