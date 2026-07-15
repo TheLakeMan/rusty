@@ -169,6 +169,11 @@ impl Evaluator {
                     if lst.is_empty() { return Ok(Value::Nil); }
 
                     if let Expr::Symbol(head) = &lst[0] {
+                        // Coverage: this is the one place a call's operator name
+                        // is known — special forms and ordinary calls alike — so
+                        // recording here attributes every invoked command by the
+                        // name actually written. Off by default (one bool read).
+                        if crate::trace::coverage_enabled() { crate::trace::cover(head); }
                         match head.as_str() {
 
                             // ── LLM Call ─────────────────────────────────

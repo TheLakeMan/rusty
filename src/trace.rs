@@ -39,6 +39,25 @@ thread_local! {
     static EVENTS:  RefCell<Vec<Event>> = RefCell::new(Vec::new());
     static SEQ:     Cell<u64> = Cell::new(0);
     static DROPPED: Cell<u64> = Cell::new(0);
+    // ── Command coverage (the truth-standing ratchet) ────────────────────
+    // Separate from the event log above: this records only the NAME of each
+    // command actually invoked, so the suite can prove which of the ~336
+    // commands really ran. Off by default (RUSTY_COVERAGE) — a normal run
+    // pays one thread-local bool read per call form and nothing else.
+    static COV_ON:  Cell<bool> = Cell::new(false);
+    static COVERED: RefCell<std::collections::HashSet<String>> =
+        RefCell::new(std::collections::HashSet::new());
+}
+
+pub fn coverage_enabled() -> bool { COV_ON.with(|c| c.get()) }
+pub fn coverage_set_enabled(on: bool) { COV_ON.with(|c| c.set(on)); }
+/// Record that `name` was invoked as a call operator. No-op when off.
+pub fn cover(name: &str) {
+    if !coverage_enabled() { return; }
+    COVERED.with(|c| { c.borrow_mut().insert(name.to_string()); });
+}
+pub fn coverage_names() -> Vec<String> {
+    COVERED.with(|c| c.borrow().iter().cloned().collect())
 }
 
 pub fn enabled() -> bool {
