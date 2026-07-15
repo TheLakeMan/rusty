@@ -37,3 +37,8 @@ null? nil
 null? empty-list
 nil distinct from empty-list
 NEW FEATURES PASSED
+-- did-you-mean --
+Undefined: 'filtr' — did you mean 'filter'?
+Undefined: 'defin' — did you mean 'define'?
+Undefined: 'string-upcase' (try (apropos "string"))
+Undefined: 'zzqx'

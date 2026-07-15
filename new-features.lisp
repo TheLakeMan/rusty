@@ -131,3 +131,10 @@
     (print "NEW FEATURES PASSED")))
 
 (run-new-tests)
+
+;; ── did-you-mean on Undefined (v0.41.0) ─────────────────────────────────
+(println "-- did-you-mean --")
+(println (try-catch (filtr even? (list 1 2)) (e) e))
+(println (try-catch (defin x 5) (e) e))
+(println (try-catch (string-upcase "hi") (e) e))
+(println (try-catch (zzqx 1) (e) e))

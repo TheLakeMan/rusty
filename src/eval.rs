@@ -22,6 +22,57 @@ pub const SPECIAL_FORMS: &[&str] = &[
     "command-registry", "deftool", "tool-call", "list-tools", "react-loop", "llm",
 ];
 
+/// Plain two-row Levenshtein distance — only ever runs on the error path.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for i in 1..=a.len() {
+        cur[0] = i;
+        for j in 1..=b.len() {
+            let sub = prev[j - 1] + if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            cur[j] = sub.min(prev[j] + 1).min(cur[j - 1] + 1);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// Build the Undefined error message, with a did-you-mean suggestion when a
+/// bound name (or special form) is within edit distance 2 (1 for names ≤3
+/// chars), ties broken lexicographically; else an apropos hint for hyphenated
+/// names. Error path only — never runs on successful lookups.
+fn undefined_error(env: &Env, name: &str) -> String {
+    let cutoff = if name.len() <= 3 { 1 } else { 2 };
+    let mut best: Option<(usize, String)> = None;
+    let mut consider = |cand: &str| {
+        if cand == name { return; }
+        let d = levenshtein(name, cand);
+        if d <= cutoff {
+            let better = match &best {
+                None => true,
+                Some((bd, bn)) => d < *bd || (d == *bd && cand < bn.as_str()),
+            };
+            if better { best = Some((d, cand.to_string())); }
+        }
+    };
+    for sf in SPECIAL_FORMS { consider(sf); }
+    let mut frame = Some(env.clone());
+    while let Some(f) = frame {
+        for k in f.borrow().vars.keys() { consider(k); }
+        let parent = f.borrow().parent.clone();
+        frame = parent;
+    }
+    if let Some((_, s)) = best {
+        return format!("Undefined: '{}' — did you mean '{}'?", name, s);
+    }
+    match name.split_once('-') {
+        Some((prefix, _)) if !prefix.is_empty() =>
+            format!("Undefined: '{}' (try (apropos \"{}\"))", name, prefix),
+        _ => format!("Undefined: '{}'", name),
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct ChatMessage {
     role: String,
@@ -149,7 +200,7 @@ impl Evaluator {
             Expr::Nil       => return Ok(Value::Nil),
             Expr::Symbol(s) => {
                 return EnvFrame::get(env, s)
-                    .ok_or_else(|| format!("Undefined: '{}'", s));
+                    .ok_or_else(|| undefined_error(env, s));
             }
             _ => {}
         }
@@ -165,7 +216,7 @@ impl Evaluator {
 
                 Expr::Symbol(s) => {
                     return EnvFrame::get(&env, s)
-                        .ok_or_else(|| format!("Undefined: '{}'", s));
+                        .ok_or_else(|| undefined_error(&env, s));
                 }
 
                 Expr::List(lst) => {
