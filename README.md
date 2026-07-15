@@ -6,6 +6,17 @@ A complete, feature-rich Lisp interpreter implemented in Rust with first-class s
 
 ---
 
+## The Three Laws
+
+wuwei, shouzhong, and mingjian — three small codebases built on Rusty — frame
+what this interpreter is for: **Honest Tools** (an agent may not call a tool
+whose declared effects don't match its body), **Proven Control** (a controller
+may not act outside bounds proven safe over every reachable state), and
+**Truthful Record** (what the agent did must replay to the same result).
+Machine-checked, not fictional: [docs/LAWS.md](docs/LAWS.md).
+
+---
+
 ## 🎯 Vision: The Symbolic Transformation Layer for AI/ML
 
 Rusty is the language you reach for when you need **computation that reasons about computation**:
@@ -32,6 +43,23 @@ Rusty is the language you reach for when you need **computation that reasons abo
 
 ## Quick Start
 
+### Install
+
+```sh
+# 1. Prebuilt binary (Linux x86_64 / aarch64) — small script, read it first:
+curl -fsSL https://raw.githubusercontent.com/TheLakeMan/rusty/main/install.sh | sh
+
+# 2. Via cargo (any platform with Rust):
+cargo install rusty-lisp
+
+# 3. From a clone:
+cargo install --path . --bin rusty --root ~/.local
+```
+
+The binary is self-contained (stdlib embedded). The `defrust` / `graph-compile`
+JIT features shell out to `rustc`, so they additionally need a Rust toolchain
+on PATH — everything else, including all three Law quickstarts, runs without one.
+
 ```bash
 # Build
 cargo build --release
@@ -41,9 +69,6 @@ cargo run
 
 # Run a Lisp file
 cargo run -- path/to/script.lisp
-
-# Install `rusty` onto your PATH (used by apps built on Rusty, e.g. wuwei)
-cargo install --path . --bin rusty --root ~/.local
 
 # Python bridge
 maturin develop
