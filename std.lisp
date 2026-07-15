@@ -694,16 +694,20 @@
                        take drop take-while drop-while range iota sum product
                        any? all? none? count find partition remove-duplicates
                        flatten1 interleave assoc assq alist-get map* filter* foldl*))
-(categorize! 'records '(get-field record-set make-record))
+(categorize! 'records '(get-field record-set make-record field))
 (categorize! 'math '(square cube inc dec average clamp sign))
 (categorize! 'strings '(string-join string-repeat string-contains? string-starts-with?
                          string-first-index string-last-index extract-sexp
                          string<? char-rank sort-strings))
-(categorize! 'control '(compose curry identity const flip negate memoize))
+;; NB: include the defmacro-defined forms too — an earlier sweep grepped only
+;; (define (f ...)) and left every std.lisp macro sitting in 'other'.
+(categorize! 'control '(compose curry identity const flip negate memoize
+                         while dotimes dolist repeat swap! time assert -> ->>))
 (categorize! 'io '(print-list show-macro-profile))
-(categorize! 'types '(constrained-checks constrained-body type-check-form
+(categorize! 'types '(define-typed constrained-checks constrained-body type-check-form
                        typed-param-name typed-param-type typed-param-check))
-(categorize! 'checkers '(spec-get verify-candidate verify-candidate-checks synthesize-verified))
+(categorize! 'checkers '(spec-get verify-candidate verify-candidate-checks synthesize-verified
+                          defun-constrained implies logic-loss))
 (categorize! 'llm '(llm-proposer))
 (categorize! 'tools '(deftool-spec tool-spec spec-tool-value spec-param-types spec-effects
                        spec-pre spec-deps type-pred safe-call finding-op undeclared-effects
