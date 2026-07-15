@@ -1,10 +1,13 @@
 [package]
-name = "rusty"
+name = "rusty-lisp"
 version = "0.41.0"
 edition = "2021"
-description = "A modern Lisp interpreter in Rust with TCO, macros, and AI agent capabilities"
+description = "A modern Lisp interpreter in Rust with TCO, macros, JIT, verification checkers, and AI agent capabilities"
 license = "AGPL-3.0-or-later"   # commercial licensing available on inquiry
+repository = "https://github.com/TheLakeMan/rusty"
+readme = "README.md"
 default-run = "rusty"   # `cargo run` starts the REPL (not rusty-lsp)
+include = ["src/**", "*.lisp", "Cargo.toml", "README.md", "LICENSE*", "docs/SPEC.md", "docs/TUTORIAL.md"]
 
 [[bin]]
 name = "rusty"
