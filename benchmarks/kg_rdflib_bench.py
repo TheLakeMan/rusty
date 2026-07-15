@@ -4,9 +4,16 @@
 # Generates /tmp/rusty-kg-bench.nt (both sides load the identical file),
 # then times: load, grandparent join (SPARQL), type+age join.
 # rdflib is a benchmark yardstick only — never a Rusty dependency.
+#
+# Usage: python3 benchmarks/kg_rdflib_bench.py [N]      (N = people, ~3 triples each)
+# N defaults to 20000 (~60k triples, the figure quoted in the README).
+# benchmarks/kg_sweep.sh drives this across scales — a ratio measured at ONE
+# size is not a claim about any other size (see the 3.1 re-record: a stale
+# absolute inverted a verdict, and an unswept ratio can too).
+import sys
 import time
 
-N = 20000  # people; ~3 triples each
+N = int(sys.argv[1]) if len(sys.argv) > 1 else 20000  # people; ~3 triples each
 
 def gen():
     lines = []
