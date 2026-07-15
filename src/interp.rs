@@ -1683,23 +1683,10 @@ pub fn setup_builtins(env: &Env) {
             _ => Err("categorize!: second arg must be a list of name symbols".into()),
         }
     });
-    b!("help", |_| {
-        println!("Rusty v{} — Lisp in Rust  |  (help) for this message", env!("CARGO_PKG_VERSION"));
-        println!("Special: define def set set! lambda if cond let let* letrec begin");
-        println!("         and or quote defmacro do try-catch match load load-relative");
-        println!("Arith:   + - * / mod expt abs sqrt floor ceiling round max min gcd");
-        println!("Compare: = < > <= >= eq? equal? not zero? positive? negative? odd? even?");
-        println!("Lists:   cons car cdr list null? pair? length append reverse nth member");
-        println!("         map filter foldl foldr for-each apply list-tail");
-        println!("Strings: str format string-length string-append substring string-ref");
-        println!("         string=? number->string string->number symbol->string");
-        println!("Types:   number? string? boolean? symbol? list? procedure? macro? nil? type-of");
-        println!("JSON:    json-encode json-decode");
-        println!("Macros:  gensym macro?");
-        println!("I/O:     display newline print println error");
-        println!("Files:   load load-relative");
-        Ok(Value::Nil)
-    });
+    // NOTE: no `help` builtin here — std.lisp defines `(help)`/`(help 'cat)`
+    // as registry-driven discovery (see std.lisp's "Command discovery"
+    // section) and, loading after builtins, shadows any binding of that name
+    // in the global env. A static builtin here would just be dead weight.
 }
 
 // ── JSON encode/decode ────────────────────────────────────────────────────

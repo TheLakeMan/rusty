@@ -596,6 +596,123 @@
             ((>= n max-steps) (list 'hit-max-steps n))
             (else (begin (agents-step) (loop (+ n 1))))))))
 
+;; ── String ordering + sort ───────────────────────────────────────────────
+;; No string<? or sort exists yet (checked); there's also no char->integer
+;; primitive to derive ordering from, so *char-order* spells out every
+;; printable ASCII character (space through ~) once, and rank is just its
+;; position in that string. Enough to totally order every command/category
+;; name in the registry deterministically, without touching the evaluator.
+(define *char-order* " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
+;; Falls back to a rank past every known char for anything outside the
+;; printable-ASCII table (e.g. the "λ" lambda alias special form) — keeps
+;; string<? total and non-erroring instead of crashing on an unmapped char.
+(define (char-rank c)
+  (let ((r (string-first-index *char-order* c)))
+    (if r r 1000)))
+(define (string<? a b)
+  (let ((la (string-length a)) (lb (string-length b)))
+    (let loop ((i 0))
+      (cond ((and (>= i la) (>= i lb)) #f)   ; equal
+            ((>= i la) #t)                    ; a exhausted first -> a < b
+            ((>= i lb) #f)                     ; b exhausted first -> a > b
+            (else
+              (let ((ca (char-rank (string-ref a i)))
+                    (cb (char-rank (string-ref b i))))
+                (cond ((< ca cb) #t)
+                      ((> ca cb) #f)
+                      (else (loop (+ i 1))))))))))
+(define (string-insert s sorted)
+  (cond ((null? sorted) (list s))
+        ((string<? s (car sorted)) (cons s sorted))
+        (else (cons (car sorted) (string-insert s (cdr sorted))))))
+;; Stable insertion sort — O(n^2), fine for registry-sized lists (~hundreds).
+(define (sort-strings lst) (foldl string-insert '() lst))
+
+;; ── Command discovery (registry-driven; single source of truth) ─────────────
+(define (commands) (map car (command-registry)))
+(define (reg-row name)
+  (let loop ((r (command-registry)))
+    (cond ((null? r) #f)
+          ((string=? (car (car r)) name) (car r))
+          (else (loop (cdr r))))))
+(define (describe name)
+  (let ((row (reg-row (if (symbol? name) (symbol->string name) name))))
+    (if (not row) (println (format "~a: unknown command" name))
+        (begin
+          (println (format "~a  [~a]  ~a" (car row) (nth row 1) (nth row 3)))
+          (if (> (string-length (nth row 2)) 0)
+              (println (format "  ~a" (nth row 2))) ())))
+    ()))
+;; apropos/help-category enumerate the registry for output, and its row order
+;; is hash-map iteration order — NOT stable across code changes. Sort by
+;; command name before printing so golden output stays stable as the
+;; registry grows.
+(define (apropos pat)
+  (for-each
+    (lambda (name)
+      (let ((row (reg-row name)))
+        (println (format "  ~a  [~a]  ~a"
+                         (car row) (nth row 1)
+                         (if (> (string-length (nth row 2)) 0) (nth row 2) (nth row 3))))))
+    (sort-strings
+      (map car (filter (lambda (row) (string-contains? (car row) pat)) (command-registry)))))
+  ())
+;; (help) with no arg: category names + counts. (help 'cat): that category.
+(define (help . opt)
+  (if (null? opt) (help-categories) (help-category (car opt))))
+(define (help-category cat)
+  (let ((c (if (symbol? cat) (symbol->string cat) cat)))
+    (for-each
+      (lambda (name)
+        (let ((row (reg-row name)))
+          (println (format "  ~a  ~a" (car row)
+                           (if (> (string-length (nth row 2)) 0) (nth row 2) "")))))
+      (sort-strings
+        (map car (filter (lambda (row) (string=? (symbol->string (nth row 3)) c))
+                          (command-registry)))))
+    ()))
+(define (help-categories)
+  (println (format "Rusty — ~a commands. (help 'category) drills in; (apropos \"x\") searches; (describe 'name)." (length (command-registry))))
+  (let ((cats (uniq-sorted (map (lambda (r) (symbol->string (nth r 3))) (command-registry)))))
+    (for-each
+      (lambda (c)
+        (println (format "  ~a (~a)" c
+                         (length (filter (lambda (r) (string=? (symbol->string (nth r 3)) c))
+                                         (command-registry))))))
+      cats)
+    ()))
+;; uniq-sorted: dedup + string-sort a list of strings (deterministic output).
+(define (uniq-sorted lst)
+  (let ((s (sort-strings lst)))
+    (let loop ((in s) (out '()))
+      (cond ((null? in) (reverse out))
+            ((and (pair? out) (string=? (car in) (car out))) (loop (cdr in) out))
+            (else (loop (cdr in) (cons (car in) out)))))))
+
+;; ── Stdlib function categories (registry grouping for std.lisp defines) ──────
+(categorize! 'lists '(caar cadr cdar cddr caddr cadddr last flatten zip zip-with
+                       take drop take-while drop-while range iota sum product
+                       any? all? none? count find partition remove-duplicates
+                       flatten1 interleave assoc assq alist-get map* filter* foldl*))
+(categorize! 'records '(get-field record-set make-record))
+(categorize! 'math '(square cube inc dec average clamp sign))
+(categorize! 'strings '(string-join string-repeat string-contains? string-starts-with?
+                         string-first-index string-last-index extract-sexp
+                         string<? char-rank sort-strings))
+(categorize! 'control '(compose curry identity const flip negate memoize))
+(categorize! 'io '(print-list show-macro-profile))
+(categorize! 'types '(constrained-checks constrained-body type-check-form
+                       typed-param-name typed-param-type typed-param-check))
+(categorize! 'checkers '(spec-get verify-candidate verify-candidate-checks synthesize-verified))
+(categorize! 'llm '(llm-proposer))
+(categorize! 'tools '(deftool-spec tool-spec spec-tool-value spec-param-types spec-effects
+                       spec-pre spec-deps type-pred safe-call finding-op undeclared-effects
+                       certify-tool-chain))
+(categorize! 'agents '(agent-reset! agent-spawn agent-names mailbox-count mailbox-set!
+                        send! agents-step agents-idle? run-agents))
+(categorize! 'meta '(commands reg-row describe apropos help help-category help-categories
+                      uniq-sorted string-insert))
+
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
   (load "agent-tools.lisp")

@@ -7,4 +7,41 @@
 (defmacro-kind special-form)
 (command-registry-kind special-form)
 (kg-add-cat kg)
+-- apropos take --
+  take  [function]  (take n lst)
+  take-while  [function]  (take-while pred lst)
+-- describe --
+take  [function]  lists
+  (take n lst)
++  [builtin]  arithmetic
+-- help categories --
+Rusty — 336 commands. (help 'category) drills in; (apropos "x") searches; (describe 'name).
+  agents (9)
+  arithmetic (28)
+  checkers (9)
+  comparison (19)
+  control (7)
+  eval (1)
+  filesystem (8)
+  graph (6)
+  io (7)
+  json (2)
+  kg (7)
+  lists (50)
+  llm (1)
+  macros (5)
+  math (9)
+  memory (6)
+  meta (10)
+  other (29)
+  records (3)
+  serialization (2)
+  special-form (40)
+  strings (23)
+  system (1)
+  tensors (15)
+  time (1)
+  tools (14)
+  trace (6)
+  types (18)
 discover-test: done
