@@ -66,11 +66,15 @@ fn main() {
         let prompt = if buffer.is_empty() { "rusty> " } else { "  ...> " };
         match rl.readline(prompt) {
             Err(_) => break,
-            Ok(line) => {
+            Ok(mut line) => {
                 if buffer.is_empty() {
                     let trimmed = line.trim();
                     if trimmed.is_empty() { continue; }
                     if trimmed == "quit" || trimmed == "exit" { break; }
+                    // `/foo` in the REPL is sugar for (apropos "foo").
+                    if let Some(q) = trimmed.strip_prefix('/') {
+                        line = format!("(apropos \"{}\")", q.trim().replace('"', ""));
+                    }
                 }
                 if !buffer.is_empty() { buffer.push('\n'); }
                 buffer.push_str(&line);

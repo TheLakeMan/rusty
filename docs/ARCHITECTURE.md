@@ -145,6 +145,8 @@ pub fn eval(&self, expr: &Expr, env: &Env) -> Result<Value, String> {
 
 **Standard Library:** Threading macros (`->`, `->>`, `dotimes`, `dolist`, `while`), functional utilities
 
+**Command discovery & coverage:** the `(command-registry)` special form (`src/eval.rs`) walks the env chain to the root and returns every bound name with its kind; std.lisp's `help`/`apropos`/`describe` are driven from it (and the REPL's `/foo` sugar expands to `(apropos "foo")`). Off-by-default coverage recording at the eval call site tracks which registered commands actually run under the golden suite; `run_tests.sh`'s coverage pass (`coverage-check.lisp`) is a hard ratchet — an untested command name fails the suite unless justified in `coverage-allowlist.lisp`.
+
 ---
 
 ### 6. Python Bridge (`src/lib.rs`)
