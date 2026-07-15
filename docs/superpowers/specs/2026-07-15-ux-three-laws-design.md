@@ -28,7 +28,8 @@ A single page, three sections + coda:
 - **Release binaries:** GitHub Releases with `rusty` + `rusty-lsp` for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` (musl if glibc-portability bites), plus `sha256sums.txt`. Built by a tag-triggered GitHub Actions workflow (`.github/workflows/release.yml`) beside the existing CI perf gate. `std.lisp` is embedded via `include_str!` so a bare binary works from any directory.
 - **`install.sh` (repo root):** deliberately small and auditable (~40 lines): detect OS/arch → download the release binary + checksum → verify sha256 → install to `~/.local/bin` → print PATH hint. Fails loudly on unsupported platforms with the cargo fallback. README invites reading it first — the *verifiable* curl|sh, published checksums; this is a brand point, not an apology.
 - **README install section rewrite**, in order: (1) curl|sh one-liner, (2) `cargo install --git https://github.com/TheLakeMan/rusty` , (3) from-clone build. Honest capability note: the binary alone runs the interpreter and all three law quickstarts; `defrust`/`graph-compile` JIT features additionally need `rustc` on PATH.
-- Non-goals: no crates.io publish, no Homebrew/AUR packaging, no Windows/macOS binaries in this pass (cargo path covers them).
+- **crates.io reservation (owner-approved 2026-07-15):** publish as **`rusty-lisp`** (`rusty` is name-squatted at 0.0.0). Package name `rusty-lisp`, binary names stay `rusty`/`rusty-lsp` (`cargo install rusty-lisp` installs both). Requires Cargo.toml metadata (`description`, `license = "AGPL-3.0-or-later"`, `repository`, `readme`) and an owner-side crates.io account/token; publish is permanent (yank-only). Prerequisite check before publishing: a `cargo install`ed binary must work from an arbitrary cwd — verify the std.lisp embedded fallback AND whether agent-tools.lisp (loaded from disk by std.lisp) degrades gracefully outside the repo; fix packaging (embed or graceful skip) if not.
+- Non-goals: no Homebrew/AUR packaging, no Windows/macOS binaries in this pass (cargo path covers them).
 
 ## Deliverable 3: Did-you-mean errors (Rusty v0.41.0)
 
@@ -45,11 +46,15 @@ A single page, three sections + coda:
 - Each block verified end-to-end on a fresh install (binary from Deliverable 2, clean clone) before the docs claim it.
 - App repos are separate commits/pushes; owner authorizes each push as usual.
 
+## Release posture (owner decision 2026-07-15)
+
+Tag **v0.41.0** for this pass; **hold v1.0.0** until external battle-testing (Hermes path) or a deliberate signal moment. Reserve the crates.io name now (see Deliverable 2). If 1.0 comes later, the one outstanding pre-tag item from the v0.37.0 freeze audit still applies: bless the defrust C ABI as f64-only + infallible for all of v1.
+
 ## Sequencing
 
 1. Deliverables 1–3 land in the Rusty repo on the current unpushed window (branch per plan discipline).
 2. Owner pushes Rusty first — shouzhong's pushed HEAD already requires Rusty ≥0.36.0, and the Laws page/quickstarts reference the release install.
-3. Tag → release workflow produces binaries; verify install.sh against the real release.
+3. Tag v0.41.0 → release workflow produces binaries; verify install.sh against the real release; owner publishes `rusty-lisp` to crates.io (needs owner's account/token).
 4. Deliverable 4 in the app repos afterward, each verified against the released binary.
 
 ## Verification
