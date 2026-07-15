@@ -160,7 +160,8 @@ Rust, invokes `rustc`, and loads the result (~1000× on `fib(30)`):
 (graph-grad (lambda (x) (* x x)) 5)          ; => (25 10)
 
 ;; training loops: compile forward+backward ONCE, shape-specialized —
-;; ~3× over graph-grad, ~37× over 1-thread PyTorch at small sizes:
+;; ~5.5× over graph-grad, ~34× over 1-thread PyTorch at small sizes
+;; (at 64x256->64 it stops paying — measure; see README):
 (define step! (graph-compile-grad loss-fn X W B T))
 (step! X W B T)                   ; => (loss gX gW gB gT), bit-identical
 ```

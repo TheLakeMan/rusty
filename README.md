@@ -399,12 +399,17 @@ new and reuses the same `.so`.
 ```
 
 Benchmarked against single-thread float64 PyTorch 2.12.1 on the same machine
-(identical inits, final losses matching to 12+ significant digits): an
-8×16→8 layer trained 1000 SGD steps runs **~11.8× faster** in Rusty
-(49.5ms vs 585.8ms); at 64×256→64 Rusty is still ~1.4× faster (316ms vs
-433ms per 100 steps). PyTorch is the yardstick, never a dependency. Data-
-dependent `if` and comparisons are not differentiable and refuse cleanly;
-non-scalar losses are rejected (reduce with `tensor-sum` or a mean).
+(identical inits; both sides land on the same final loss — bit-identical at
+8×16→8): an 8×16→8 layer trained 1000 SGD steps runs **~6× faster** in Rusty
+(~34ms vs ~208ms), where PyTorch's per-op dispatch overhead dominates. At
+64×256→64 the result **flips — PyTorch wins by ~2.6×** (~121ms vs ~46ms per
+100 steps): BLAS beats a naive O(n³) matmul once flops dominate. The crossover
+sits between those two shapes. PyTorch is the yardstick, never a dependency.
+Re-run it yourself — `benchmarks/tensor_bench.lisp` +
+`benchmarks/tensor_torch_bench.py`; wall-clock absolutes are machine-dependent,
+so trust the ratio and the crossover, not the milliseconds. Data-dependent `if`
+and comparisons are not differentiable and refuse cleanly; non-scalar losses are
+rejected (reduce with `tensor-sum` or a mean).
 
 #### Fused training kernels (graph-compile-grad)
 
@@ -419,12 +424,16 @@ non-scalar losses are rejected (reduce with `tensor-sum` or a mean).
 ```
 
 Same workloads, fused vs interpreted (results bit-identical): the 8×16→8
-training loop drops 44ms → **15.8ms** (~3×, and **~37×** vs the PyTorch
-number above); 64×256→64 is parity (~125ms both ways) because naive-O(n³)
-matmul flops dominate — though that matmul itself got **~2.5× faster** in
-v0.20.0 (slice-based ikj loops, same summation order, so every bit-for-bit
-claim still holds). Calling a kernel with differently-shaped tensors is an
-error — compile again for new shapes, as you would re-trace a JIT.
+training loop drops ~34ms → **~6.2ms** (~5.5×, and **~34×** vs the PyTorch
+number above) — compiling once replaces the graph rebuild that `graph-grad`
+pays on every call. At 64×256→64 fusing **does not pay: ~146ms vs ~121ms
+interpreted (~1.2× slower)**, and both lose to BLAS. The likely cost is the
+flat-buffer ABI marshalling ~75k f64 per call at that shape, which buys
+nothing once naive-O(n³) matmul flops dominate — though that matmul itself
+got **~2.5× faster** in v0.20.0 (slice-based ikj loops, same summation order,
+so every bit-for-bit claim still holds). Fuse small graphs; at larger shapes
+measure before assuming. Calling a kernel with differently-shaped tensors is
+an error — compile again for new shapes, as you would re-trace a JIT.
 
 ### Agent / Tool Forms
 
