@@ -42,6 +42,7 @@ run_test "pkg-test.lisp"     "expected_pkg.txt"    "pkg-test.lisp (package manag
 run_test "testkit-test.lisp" "expected_testkit.txt" "testkit-test.lisp (testing framework)"
 run_test "kg-test.lisp"      "expected_kg.txt"     "kg-test.lisp (knowledge graph)"
 run_test "discover-test.lisp" "expected_discover.txt" "discover-test.lisp (command registry)"
+run_test "commands-test.lisp" "expected_commands.txt" "commands-test.lisp (command smoke)"
 
 # rusty-lsp speaks framed JSON-RPC on stdio — a scripted session instead of a golden diff
 if python3 lsp-test.py > /dev/null 2>&1; then
@@ -51,6 +52,19 @@ else
     echo "❌  lsp-test.py (language server)"
     FAIL=$((FAIL+1))
 fi
+
+# ── Coverage ratchet ────────────────────────────────────────────────────────
+COVFILE="$(mktemp)"
+export RUSTY_COVERAGE_FILE="$COVFILE"
+for f in tests.lisp new-features.lisp hello.lisp swarm.lisp symreg-test.lisp \
+         synth-test.lisp prover-test.lisp robot-test.lisp pkg-test.lisp \
+         testkit-test.lisp kg-test.lisp discover-test.lisp commands-test.lisp; do
+    RUSTY_COVERAGE=1 "$RUSTY" "$f" >/dev/null 2>&1
+done
+# check runs WITHOUT RUSTY_COVERAGE so it doesn't record itself
+run_test "coverage-check.lisp" "expected_coverage.txt" "coverage-check.lisp (ratchet)"
+unset RUSTY_COVERAGE_FILE
+rm -f "$COVFILE"
 
 echo
 echo "Results: $PASS passed, $FAIL failed"

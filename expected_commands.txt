@@ -1,0 +1,229 @@
+== list/predicate/math bulk ==
+(caar 1)
+(cdar (2))
+(cddr (3 4))
+(ceiling 2)
+(round 2)
+(gcd 6)
+(zero? #t)
+(even? #t)
+(odd? #t)
+(positive? #t)
+(negative? #t)
+(boolean? #t)
+(string? #t)
+(type-of number)
+(macro?-false #f)
+(macro?-true #t)
+(native? #f)
+(eq? #t)
+(nil ())
+(list-tail (3 4 5))
+(inc 6)
+(dec 4)
+(square 25)
+(average 5)
+(sign -1)
+== strings ==
+(str a1#t)
+(string-append-list abc)
+(string-join a-b-c)
+(string-repeat ababab)
+(string-starts-with? #t)
+(string-last-index 3)
+(number->string 42)
+(string->number 42)
+(string->symbol foo)
+(string->list (a b))
+(extract-sexp (foo 1 2))
+== control flow / macros ==
+(do-loop 10)
+(letrec* #t)
+(match-atom five)
+(match-list 3)
+(unless yes)
+(while-false ())
+(swap! (2 1))
+(dolist (1 2 3))
+(dotimes (0 1 2))
+(repeat 4)
+(-> 12)
+(->> 12)
+(foldr (1 2 3))
+(map* (2 4 6))
+(filter* (2 4))
+(foldl* 6)
+(define-macro 6)
+(eval-when ran-at-load)
+(gensym-is-symbol #t)
+(lambda-alias-fn 6)
+(lambda-alias-lambda-char 6)
+== functional utilities ==
+(identity 5)
+(const 9)
+(flip 7)
+(negate #t)
+(curry 6)
+(memoize 25)
+(compose #t)
+== list utilities ==
+(count 2)
+(find 2)
+(partition ((2 4) (1 3)))
+(remove-duplicates (1 2 3))
+(interleave (1 0 2 0 3))
+(iota (0 1 2 3 4))
+(product 24)
+(any? #t)
+(none? #t)
+(zip ((1 3) (2 4)))
+(zip-with (4 6))
+(take (1 2))
+(drop (3))
+(take-while (2 4))
+(drop-while (5 6))
+(last 3)
+(flatten (1 2 3 4 5))
+(flatten1 (1 2 3 4))
+(alist-get 2)
+(assq (b . 2))
+== records ==
+(make-record ((a 1) (b 2)))
+(get-field 1)
+(field 1)
+(record-set ((a 99) (b 2)))
+== io ==
+hi-from-display
+1
+2
+3
+== tensors ==
+(tensor? #t)
+(tensor->list ((1 2) (3 4)))
+(tensor-shape (2 2))
+(tensor-ref 2)
+(tensor-add ((6 8) (10 12)))
+(tensor-sub ((4 4) (4 4)))
+(tensor-mul ((5 12) (21 32)))
+(tensor-div ((5 3) (2.3333333333333335 2)))
+(tensor-sum 10)
+(tensor-map ((2 4) (6 8)))
+(matmul ((19 22) (43 50)))
+(transpose ((1 3) (2 4)))
+(zeros ((0 0) (0 0)))
+(ones ((1 1) (1 1)))
+(relu (0 2 0 4))
+== graph ir ==
+(graph-node-count 4)
+(graph-eval 13)
+(graph-grad (25 10))
+(graph-ir-node-count 2)
+== json ==
+(json-encode [1, "two", true])
+(json-decode (1 two #t))
+== knowledge graph ==
+(kg-triples-empty ())
+(kg-triples ((cmdtest-a rel cmdtest-b)))
+== filesystem (under /tmp/rusty-cmdtest) ==
+(read-file hello world!)
+(file-exists-tool #t)
+(dir-list (a.txt sub))
+(tool-call #t)
+(delete-file-worked #f)
+== serialization ==
+(load-model (1 2 3))
+== checkpoint ==
+(checkpoint-file-exists #t)
+== load-relative ==
+(load-relative yes)
+== tracing ==
+(trace-report-nonempty #t)
+(trace-dropped 0)
+(trace-cleared 0)
+== macro profiler ==
+(macro-profile-nonempty #t)
+(macro-profile-reset-empty 0)
+== agents ==
+(agent-names (cmdtest-echoer))
+(mailbox-count 0)
+(agent-names-after-reset ())
+== checkers / tools ==
+(effectful?-pure #f)
+(effectful?-io #t)
+(define-typed 7)
+(check-types ok)
+(defun-constrained 4)
+(logic-loss-true 0)
+(logic-loss-false 1)
+(synthesize-verified (verified #<lambda (x)> 1))
+(tool? #t)
+(tool-name cmdtest-tool-add)
+(tool-spec-found #t)
+(spec-tool-value #t)
+(spec-param-types ((a number) (b number)))
+(spec-effects ())
+(spec-pre #t)
+(spec-deps ())
+(safe-call 7)
+(finding-op println)
+(undeclared-effects (println))
+(certify-tool-chain-ok certified)
+(certify-tool-chain-lies ((cmdtest-tool-print undeclared-effects (println))))
+(list-tools-has-new-tool found)
+== typed-param helpers ==
+(typed-param-type number)
+(typed-param-check #t)
+== agent tool wrappers ==
+(list-dir ckpt.lisp
+loadme.lisp
+model.json
+sub)
+(shell-run hi)
+(search-files #t)
+(memory-path #t)
+-- show-tools --
+Registered tools:
+  append-file(path, content) — Append content to a file
+  cmdtest-tracetool(a, b) — adds for tracing
+  list-dir(path) — List files and directories at the given path
+  file-exists(path) — Check if a file or directory exists
+  cmdtest-tool-add(a, b) — adds two numbers
+  create-dir(path) — Create a directory (and any parents) at the given path
+  search-files(pattern) — Search for a pattern across files in current directory
+  delete-file(path) — Delete a file at the given path
+  read-file(path) — Read the contents of a file at the given path
+  ask-llm(prompt) — Ask the local LLM a question and get a response
+  write-file(path, content) — Write content to a file at the given path
+  cmdtest-tool-print(x) — prints x
+  shell-run(command) — Run a shell command and return its output
+-- agent-help --
+Registered tools:
+  append-file(path, content) — Append content to a file
+  cmdtest-tracetool(a, b) — adds for tracing
+  list-dir(path) — List files and directories at the given path
+  file-exists(path) — Check if a file or directory exists
+  cmdtest-tool-add(a, b) — adds two numbers
+  create-dir(path) — Create a directory (and any parents) at the given path
+  search-files(pattern) — Search for a pattern across files in current directory
+  delete-file(path) — Delete a file at the given path
+  read-file(path) — Read the contents of a file at the given path
+  ask-llm(prompt) — Ask the local LLM a question and get a response
+  write-file(path, content) — Write content to a file at the given path
+  cmdtest-tool-print(x) — prints x
+  shell-run(command) — Run a shell command and return its output
+== meta ==
+(commands-count-matches #t)
+(commands-has-map found)
+-- help json --
+  json-decode  
+  json-encode  
+-- help trace --
+  trace-clear  
+  trace-dropped  
+  trace-event  
+  trace-off  
+  trace-on  
+  trace-report  
+== cleanup ==
+(cleaned-up #t)
+commands-test: done
