@@ -1497,6 +1497,27 @@ pub fn setup_builtins(env: &Env) {
     b!("file-exists?", |args| {
         Ok(Value::Bool(std::path::Path::new(one_path(args, "file-exists?")?).exists()))
     });
+    // Symlink safety primitives (0.42.0). file-read/write/etc. all FOLLOW
+    // symlinks, so a string-prefix "under the box?" guard is defeated by a
+    // symlink inside the box pointing out. These two let a guard resolve the
+    // REAL location before checking — see wuwei's safe-under?.
+    // file-symlink? is no-follow (lstat): #t iff the path itself is a symlink
+    // (including a dangling one); #f for a regular file or a missing path.
+    b!("file-symlink?", |args| {
+        let p = one_path(args, "file-symlink?")?;
+        Ok(Value::Bool(std::fs::symlink_metadata(p)
+            .map(|m| m.file_type().is_symlink()).unwrap_or(false)))
+    });
+    // file-realpath canonicalizes: resolves symlinks + ".." to a real absolute
+    // path. Nil (not an error) when the path can't be resolved — it must exist,
+    // so a guard tests the parent for a not-yet-created file. Nil-on-miss keeps
+    // guard predicates branch-free, like recall.
+    b!("file-realpath", |args| {
+        let p = one_path(args, "file-realpath")?;
+        Ok(std::fs::canonicalize(p)
+            .map(|pb| Value::String(pb.to_string_lossy().into_owned()))
+            .unwrap_or(Value::Nil))
+    });
     b!("file-delete", |args| {
         let p = one_path(args, "file-delete")?;
         std::fs::remove_file(p).map(|_| Value::Bool(true))

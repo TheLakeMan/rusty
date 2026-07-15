@@ -138,3 +138,12 @@
 (println (try-catch (defin x 5) (e) e))
 (println (try-catch (string-upcase "hi") (e) e))
 (println (try-catch (zzqx 1) (e) e))
+
+;; ── symlink-safety primitives (v0.42.0) ─────────────────────────────────
+;; The symlink=true case needs a real symlink (no Lisp primitive makes one) and
+;; is proven in wuwei's suite; here we lock the no-fixture properties.
+(println "-- symlink-safety --")
+(println (file-symlink? "Cargo.toml"))                  ; a regular file: #f
+(println (string? (file-realpath "Cargo.toml")))        ; resolves to a real path: #t
+(println (file-symlink? "/tmp/rusty-nope-xyz"))         ; missing path: #f
+(println (nil? (file-realpath "/tmp/rusty-nope-xyz")))  ; unresolvable: nil

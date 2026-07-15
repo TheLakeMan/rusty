@@ -42,3 +42,8 @@ Undefined: 'filtr' — did you mean 'filter'?
 Undefined: 'defin' — did you mean 'define'?
 Undefined: 'string-upcase' (try (apropos "string"))
 Undefined: 'zzqx'
+-- symlink-safety --
+#f
+#t
+#f
+#t
