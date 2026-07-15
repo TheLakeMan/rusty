@@ -33,8 +33,11 @@ A single page, three sections + coda:
 
 ## Deliverable 3: Did-you-mean errors (Rusty v0.41.0)
 
-- On an `Undefined: 'name'` error (symbol lookup failure at eval time), append a suggestion: `— did you mean 'string-append'? Try (apropos "string")`.
-- Candidates come from the same env-chain walk the command registry uses; nearest by edit distance (Levenshtein; suggest only if distance ≤2, no suggestion otherwise). The apropos hint uses a sensible substring of the unknown name (e.g. longest prefix before a `-`, else the whole name).
+- On an `Undefined: 'name'` error (symbol lookup failure at eval time), two paths:
+  - Close match exists → `Undefined: 'filtr' — did you mean 'filter'?`
+  - No close match but the name is hyphenated → `Undefined: 'string-upcase' (try (apropos "string"))` (hint = prefix before the first `-`).
+  - Neither → message unchanged.
+- Candidates: every binding in the env chain + `SPECIAL_FORMS`; nearest by Levenshtein distance (cutoff 2, or 1 for names ≤3 chars so short typos don't match nonsense); ties broken lexicographically.
 - **Zero cost on the happy path:** computed only when the error is being raised. Error path may walk the env; that is acceptable.
 - Deterministic: ties broken by lexicographic order so golden tests are stable.
 - Tests: extend `tests.lisp` or `new-features.lisp` with a try-catch capturing the suggestion text; goldens updated. All 15 existing checks stay green; the coverage ratchet polices any new command surface automatically.
