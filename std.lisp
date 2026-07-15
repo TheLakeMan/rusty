@@ -621,12 +621,33 @@
                 (cond ((< ca cb) #t)
                       ((> ca cb) #f)
                       (else (loop (+ i 1))))))))))
-(define (string-insert s sorted)
-  (cond ((null? sorted) (list s))
-        ((string<? s (car sorted)) (cons s sorted))
-        (else (cons (car sorted) (string-insert s (cdr sorted))))))
-;; Stable insertion sort — O(n^2), fine for registry-sized lists (~hundreds).
-(define (sort-strings lst) (foldl string-insert '() lst))
+;; Merge sort — O(n log n), stable (ties take from the left half). An insertion
+;; sort here cost ~12 s on every (help)/(apropos) at the ~336-command registry:
+;; each string<? walks *char-order* per character through the interpreter, so
+;; n^2 comparisons is not survivable at this size. Keep this O(n log n).
+(define (string-merge a b)
+  (cond ((null? a) b)
+        ((null? b) a)
+        ((string<? (car b) (car a)) (cons (car b) (string-merge a (cdr b))))
+        (else (cons (car a) (string-merge (cdr a) b)))))
+(define (sort-strings lst)
+  (if (or (null? lst) (null? (cdr lst))) lst
+      (let ((half (floor (/ (length lst) 2))))
+        (string-merge (sort-strings (take half lst))
+                      (sort-strings (drop half lst))))))
+;; Same merge sort over registry ROWS, keyed by name — lets apropos/help sort
+;; the rows they already have instead of re-deriving each one via reg-row
+;; (which rebuilt the whole registry per result).
+(define (row-merge a b)
+  (cond ((null? a) b)
+        ((null? b) a)
+        ((string<? (car (car b)) (car (car a))) (cons (car b) (row-merge a (cdr b))))
+        (else (cons (car a) (row-merge (cdr a) b)))))
+(define (sort-rows rows)
+  (if (or (null? rows) (null? (cdr rows))) rows
+      (let ((half (floor (/ (length rows) 2))))
+        (row-merge (sort-rows (take half rows))
+                   (sort-rows (drop half rows))))))
 
 ;; ── Command discovery (registry-driven; single source of truth) ─────────────
 (define (commands) (map car (command-registry)))
@@ -649,13 +670,11 @@
 ;; registry grows.
 (define (apropos pat)
   (for-each
-    (lambda (name)
-      (let ((row (reg-row name)))
-        (println (format "  ~a  [~a]  ~a"
-                         (car row) (nth row 1)
-                         (if (> (string-length (nth row 2)) 0) (nth row 2) (nth row 3))))))
-    (sort-strings
-      (map car (filter (lambda (row) (string-contains? (car row) pat)) (command-registry)))))
+    (lambda (row)
+      (println (format "  ~a  [~a]  ~a"
+                       (car row) (nth row 1)
+                       (if (> (string-length (nth row 2)) 0) (nth row 2) (nth row 3)))))
+    (sort-rows (filter (lambda (row) (string-contains? (car row) pat)) (command-registry))))
   ())
 ;; (help) with no arg: category names + counts. (help 'cat): that category.
 (define (help . opt)
@@ -663,30 +682,36 @@
 (define (help-category cat)
   (let ((c (if (symbol? cat) (symbol->string cat) cat)))
     (for-each
-      (lambda (name)
-        (let ((row (reg-row name)))
-          (println (format "  ~a  ~a" (car row)
-                           (if (> (string-length (nth row 2)) 0) (nth row 2) "")))))
-      (sort-strings
-        (map car (filter (lambda (row) (string=? (symbol->string (nth row 3)) c))
-                          (command-registry)))))
+      (lambda (row)
+        (println (format "  ~a  ~a" (car row)
+                         (if (> (string-length (nth row 2)) 0) (nth row 2) ""))))
+      (sort-rows (filter (lambda (row) (string=? (symbol->string (nth row 3)) c))
+                         (command-registry))))
     ()))
 (define (help-categories)
-  (println (format "Rusty — ~a commands. (help 'category) drills in; (apropos \"x\") searches; (describe 'name)." (length (command-registry))))
-  (let ((cats (uniq-sorted (map (lambda (r) (symbol->string (nth r 3))) (command-registry)))))
-    (for-each
-      (lambda (c)
-        (println (format "  ~a (~a)" c
-                         (length (filter (lambda (r) (string=? (symbol->string (nth r 3)) c))
-                                         (command-registry))))))
-      cats)
-    ()))
+  ;; Bind the registry ONCE — it was rebuilt per category before.
+  (let ((reg (command-registry)))
+    (println (format "Rusty — ~a commands. (help 'category) drills in; (apropos \"x\") searches; (describe 'name)." (length reg)))
+    (let ((cats (uniq-sorted (map (lambda (r) (symbol->string (nth r 3))) reg))))
+      (for-each
+        (lambda (c)
+          (println (format "  ~a (~a)" c
+                           (length (filter (lambda (r) (string=? (symbol->string (nth r 3)) c))
+                                           reg)))))
+        cats)
+      ())))
 ;; uniq-sorted: dedup + string-sort a list of strings (deterministic output).
+;; Dedupes BEFORE sorting — the input is one entry per command (~336) but only
+;; ~28 distinct categories, so sorting the deduped set is far less work.
+(define (string-member? s lst)
+  (cond ((null? lst) #f)
+        ((string=? s (car lst)) #t)
+        (else (string-member? s (cdr lst)))))
 (define (uniq-sorted lst)
-  (let ((s (sort-strings lst)))
-    (let loop ((in s) (out '()))
-      (cond ((null? in) (reverse out))
-            ((and (pair? out) (string=? (car in) (car out))) (loop (cdr in) out))
+  (sort-strings
+    (let loop ((in lst) (out '()))
+      (cond ((null? in) out)
+            ((string-member? (car in) out) (loop (cdr in) out))
             (else (loop (cdr in) (cons (car in) out)))))))
 
 ;; ── Stdlib function categories (registry grouping for std.lisp defines) ──────
@@ -698,7 +723,7 @@
 (categorize! 'math '(square cube inc dec average clamp sign))
 (categorize! 'strings '(string-join string-repeat string-contains? string-starts-with?
                          string-first-index string-last-index extract-sexp
-                         string<? char-rank sort-strings))
+                         string<? char-rank sort-strings string-merge string-member?))
 ;; NB: include the defmacro-defined forms too — an earlier sweep grepped only
 ;; (define (f ...)) and left every std.lisp macro sitting in 'other'.
 (categorize! 'control '(compose curry identity const flip negate memoize
@@ -715,7 +740,7 @@
 (categorize! 'agents '(agent-reset! agent-spawn agent-names mailbox-count mailbox-set!
                         send! agents-step agents-idle? run-agents))
 (categorize! 'meta '(commands reg-row describe apropos help help-category help-categories
-                      uniq-sorted string-insert))
+                      uniq-sorted sort-rows row-merge))
 
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
