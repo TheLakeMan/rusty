@@ -53,12 +53,14 @@ thread_local! {
 }
 
 pub fn coverage_enabled() -> bool { COV_ON.with(|c| c.get()) }
+#[allow(dead_code)] // used only by the rusty CLI (main.rs arms coverage); trace.rs is compiled into all three targets
 pub fn coverage_set_enabled(on: bool) { COV_ON.with(|c| c.set(on)); }
 /// Record that `name` was invoked as a call operator. No-op when off.
 pub fn cover(name: &str) {
     if !coverage_enabled() { return; }
     COVERED.with(|c| { c.borrow_mut().insert(name.to_string()); });
 }
+#[allow(dead_code)] // used only by the rusty CLI (main.rs dumps coverage on exit)
 pub fn coverage_names() -> Vec<String> {
     COVERED.with(|c| c.borrow().iter().cloned().collect())
 }
