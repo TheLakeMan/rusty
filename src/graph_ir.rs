@@ -467,16 +467,17 @@ fn t_binop(a: &GVal, b: &GVal, name: &str, f: fn(f64, f64) -> f64) -> Result<GVa
 }
 
 /// The one ikj matmul kernel body, shared by `t_matmul` and the `matmul`
-/// builtin (interp.rs). Per-element accumulation order (p ascending into
-/// each o[i][j]) is the order the bit-for-bit PyTorch claim depends on —
-/// both compiled versions below run this exact body, and neither FMA
-/// contraction nor reduction reassociation exists in Rust codegen, so the
-/// AVX2 version differs in speed only, never in bits.
+/// builtin (interp.rs), expressed over a contiguous band of output rows
+/// [i0, i0+rows). Per-element accumulation order (p ascending into each
+/// o[i][j]) is the order the bit-for-bit PyTorch claim depends on — the
+/// AVX2 version and every pool worker run this exact body, and neither FMA
+/// contraction nor reduction reassociation exists in Rust codegen, so wider
+/// vectors and row-parallelism change speed only, never bits.
 #[inline(always)]
-fn matmul_ikj_body(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize, data: &mut [f64]) {
-    for i in 0..n {
-        let x_row = &xd[i * k..(i + 1) * k];
-        let o_row = &mut data[i * m..(i + 1) * m];
+fn matmul_ikj_rows(xd: &[f64], yd: &[f64], i0: usize, rows: usize, k: usize, m: usize, out: &mut [f64]) {
+    for li in 0..rows {
+        let x_row = &xd[(i0 + li) * k..(i0 + li + 1) * k];
+        let o_row = &mut out[li * m..(li + 1) * m];
         for p in 0..k {
             let x = x_row[p];
             let y_row = &yd[p * m..(p + 1) * m];
@@ -489,20 +490,159 @@ fn matmul_ikj_body(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize, data: &
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn matmul_ikj_avx2(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize, data: &mut [f64]) {
-    matmul_ikj_body(xd, yd, n, k, m, data)
+unsafe fn matmul_ikj_rows_avx2(xd: &[f64], yd: &[f64], i0: usize, rows: usize, k: usize, m: usize, out: &mut [f64]) {
+    matmul_ikj_rows(xd, yd, i0, rows, k, m, out)
 }
 
-/// Dispatch once per call: the binary stays baseline x86-64, AVX2 is taken
-/// when the running CPU has it (std caches the detection).
-pub fn matmul_ikj(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize) -> Vec<f64> {
-    let mut data = vec![0.0; n * m];
+/// Per-band dispatch: the binary stays baseline x86-64, AVX2 is taken when
+/// the running CPU has it (std caches the detection).
+fn matmul_rows_dispatch(xd: &[f64], yd: &[f64], i0: usize, rows: usize, k: usize, m: usize, out: &mut [f64]) {
     #[cfg(target_arch = "x86_64")]
     if std::arch::is_x86_feature_detected!("avx2") {
-        unsafe { matmul_ikj_avx2(xd, yd, n, k, m, &mut data) };
-        return data;
+        return unsafe { matmul_ikj_rows_avx2(xd, yd, i0, rows, k, m, out) };
     }
-    matmul_ikj_body(xd, yd, n, k, m, &mut data);
+    matmul_ikj_rows(xd, yd, i0, rows, k, m, out)
+}
+
+// ── Row-parallel matmul pool ────────────────────────────────────────────
+// Workers are plain-f64 labourers: no Value/Rc/Env ever crosses this
+// boundary, so the Rc-based interpreter stays single-threaded. Scheduling
+// is deliberately FIXED-ASSIGNMENT, not work-stealing: worker w always owns
+// output-row chunk w+1 and the dispatching thread owns chunk 0, so a worker
+// never touches any state that could belong to a different job — a shared
+// grab-counter would let a straggler from job N steal (or deadlock) job
+// N+1. Each worker's whole interaction per job is: read the job under the
+// mutex, write its own disjoint output band, one Release increment of the
+// latch. The dispatcher publishes under the same mutex (happens-before the
+// reads) and Acquire-spins on the latch until every band is written, so
+// the raw pointers in a Job never outlive the borrow they came from.
+mod mm_pool {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Condvar, Mutex, OnceLock};
+
+    #[derive(Clone, Copy)]
+    pub struct Job {
+        a: *const f64, a_len: usize,
+        b: *const f64, b_len: usize,
+        out: *mut f64,
+        n: usize, k: usize, m: usize,
+        nchunks: usize, chunk_rows: usize,
+    }
+    unsafe impl Send for Job {}
+
+    struct Shared {
+        slot: Mutex<(u64, Option<Job>)>, // (generation, current job)
+        cv: Condvar,
+        done: AtomicUsize, // bands finished by workers this generation
+    }
+
+    pub struct Pool {
+        sh: Arc<Shared>,
+        pub workers: usize,
+    }
+
+    fn worker(sh: Arc<Shared>, w: usize) {
+        let mut seen = 0u64;
+        loop {
+            let job = {
+                let mut g = sh.slot.lock().unwrap();
+                while g.0 == seen {
+                    g = sh.cv.wait(g).unwrap();
+                }
+                seen = g.0;
+                g.1.unwrap()
+            };
+            let ci = w + 1; // fixed assignment; chunk 0 is the dispatcher's
+            if ci < job.nchunks {
+                let i0 = ci * job.chunk_rows;
+                let rows = job.chunk_rows.min(job.n - i0);
+                unsafe {
+                    let a = std::slice::from_raw_parts(job.a, job.a_len);
+                    let b = std::slice::from_raw_parts(job.b, job.b_len);
+                    let out = std::slice::from_raw_parts_mut(job.out.add(i0 * job.m), rows * job.m);
+                    super::matmul_rows_dispatch(a, b, i0, rows, job.k, job.m, out);
+                }
+                sh.done.fetch_add(1, Ordering::Release);
+            }
+        }
+    }
+
+    impl Pool {
+        fn new(workers: usize) -> Pool {
+            let sh = Arc::new(Shared {
+                slot: Mutex::new((0, None)),
+                cv: Condvar::new(),
+                done: AtomicUsize::new(0),
+            });
+            for w in 0..workers {
+                let s = sh.clone();
+                std::thread::Builder::new()
+                    .name(format!("rusty-mm-{}", w))
+                    .spawn(move || worker(s, w))
+                    .expect("rusty-mm: failed to spawn pool worker");
+            }
+            Pool { sh, workers }
+        }
+
+        /// Split the n output rows into equal contiguous bands, run band 0
+        /// on this thread and the rest on the workers, return when all are
+        /// written. Every band runs the identical kernel body.
+        pub fn matmul(&self, a: &[f64], b: &[f64], n: usize, k: usize, m: usize, out: &mut [f64]) {
+            let nchunks = (self.workers + 1).min(n);
+            let chunk_rows = (n + nchunks - 1) / nchunks;
+            let nchunks = (n + chunk_rows - 1) / chunk_rows;
+            let job = Job {
+                a: a.as_ptr(), a_len: a.len(),
+                b: b.as_ptr(), b_len: b.len(),
+                out: out.as_mut_ptr(),
+                n, k, m, nchunks, chunk_rows,
+            };
+            self.sh.done.store(0, Ordering::Relaxed);
+            {
+                let mut g = self.sh.slot.lock().unwrap();
+                g.0 += 1;
+                g.1 = Some(job);
+            }
+            self.sh.cv.notify_all();
+            let rows0 = chunk_rows.min(n);
+            super::matmul_rows_dispatch(a, b, 0, rows0, k, m, &mut out[..rows0 * m]);
+            while self.sh.done.load(Ordering::Acquire) < nchunks - 1 {
+                std::hint::spin_loop();
+            }
+        }
+    }
+
+    /// None = stay serial (single core or RUSTY_MM_THREADS <= 1).
+    pub fn get() -> Option<&'static Pool> {
+        static POOL: OnceLock<Option<Pool>> = OnceLock::new();
+        POOL.get_or_init(|| {
+            let nthreads = std::env::var("RUSTY_MM_THREADS")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or_else(|| std::thread::available_parallelism().map(|x| x.get()).unwrap_or(1));
+            if nthreads <= 1 {
+                return None;
+            }
+            Some(Pool::new(nthreads - 1)) // the dispatching thread is a lane too
+        })
+        .as_ref()
+    }
+}
+
+/// Entry point shared by `t_matmul` and the `matmul` builtin. Row-parallel
+/// above the measured crossover (~64k mul-adds on the N95: pool dispatch is
+/// ~1.4 µs, so 32x64·64x32 is already 1.39x and the training shapes 2.1-2.3x;
+/// below it the pool is pure overhead), serial under it. `RUSTY_MM_THREADS`
+/// overrides the lane count (<=1 forces serial), mirroring RUSTY_CE_THREADS.
+pub fn matmul_ikj(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize) -> Vec<f64> {
+    let mut data = vec![0.0; n * m];
+    if n >= 2 && n * k * m >= 65536 {
+        if let Some(pool) = mm_pool::get() {
+            pool.matmul(xd, yd, n, k, m, &mut data);
+            return data;
+        }
+    }
+    matmul_rows_dispatch(xd, yd, 0, n, k, m, &mut data);
     data
 }
 

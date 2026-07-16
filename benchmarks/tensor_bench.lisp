@@ -50,6 +50,26 @@
 ;;;   was REFUTED as a ~2x lane on this machine (kernel already at ~67% of
 ;;;   non-FMA peak). Next bit-preserving lever: threading rows.
 ;;;
+;;; v0.51.0 — row-parallel interpreter matmul: graph_ir::matmul_ikj splits
+;;;   output rows across a persistent fixed-assignment pool (worker w owns
+;;;   band w+1, dispatcher owns band 0; no work-stealing, so no cross-job
+;;;   straggler hazard) above the measured ~64k mul-add crossover;
+;;;   RUSTY_MM_THREADS overrides (<=1 = serial). Every band runs the same
+;;;   kernel body -> per-element op order untouched; verified bit-identical
+;;;   serial-vs-pooled via save-model diff on 6 shapes (incl. 67 rows,
+;;;   non-divisible) AND both final losses below unchanged.
+;;;     64x256->64 x100  graph-grad (interp) ~106 -> ~88 ms median of 3 runs
+;;;       (-17%; best run 76 ms; spread widened 76-96 — 4 shared E-cores)
+;;;     8x16->8 x1000    unchanged ~33 ms (below crossover, stays serial)
+;;;     JIT rows unchanged (~99 ms medium) — the FUSED KERNEL IS STILL
+;;;     SINGLE-THREADED, so the interpreter re-took the medium lead. Pool
+;;;     micro-bench: 2.07-2.25x at the three training shapes, ~2.3x plateau
+;;;     at 512^3 (4 E-cores, shared L2). Threading the JIT matmul codegen is
+;;;     the open follow-up.
+;;;   PyTorch note: tensor_torch_bench.py pins 1 thread BY DESIGN (kernel
+;;;   quality comparison). Report threaded-Rusty numbers as their own row,
+;;;   never against the 1-thread torch row.
+;;;
 ;;; Loss = mean((relu(xW+b) - t)^2). The graph IR has no capture, so everything
 ;;; the loss needs is a param or a literal; the mean divisor is passed as `nn`.
 ;;; Inputs are integer-derived /8 — exactly representable, so Rusty and torch
