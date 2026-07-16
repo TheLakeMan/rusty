@@ -25,7 +25,8 @@ pub fn effect_reason(op: &str) -> Option<&'static str> {
         "shell" | "shell-run" => Some("runs a shell command"),
         "read-file" | "write-file" | "append-file" | "delete-file" | "file-exists" | "list-dir"
         | "file-read" | "file-write" | "file-append" | "file-delete" | "file-exists?"
-        | "dir-create" | "dir-list" | "file-realpath" | "file-symlink?" | "checkpoint"
+        | "dir-create" | "dir-list" | "file-realpath" | "file-symlink?" | "file-hash"
+        | "checkpoint"
             => Some("touches the filesystem"),
         "llm" | "tool-call" | "react-loop" => Some("calls an external LLM/tool"),
         "remember" | "recall" | "forget" | "memory-list" => Some("reads or writes persistent memory"),

@@ -1518,6 +1518,22 @@ pub fn setup_builtins(env: &Env) {
             .map(|pb| Value::String(pb.to_string_lossy().into_owned()))
             .unwrap_or(Value::Nil))
     });
+    // file-hash (0.45.0): lowercase-hex SHA-256 of a file's bytes, streamed so a
+    // large file never lands in memory. Nil (not an error) when the path can't
+    // be read — a missing file is a *result* for an integrity check (the file
+    // vanishing is exactly what you're checking for), not a crash; same
+    // Nil-on-miss shape as file-realpath, and it keeps comparisons branch-free.
+    // Follows symlinks, like every other content-reading builtin: it hashes what
+    // is at the resolved path. Pair with file-symlink?/file-realpath if the
+    // identity of the path itself matters.
+    b!("file-hash", |args| {
+        use sha2::{Digest, Sha256};
+        let p = one_path(args, "file-hash")?;
+        let mut f = match std::fs::File::open(p) { Ok(f) => f, Err(_) => return Ok(Value::Nil) };
+        let mut hasher = Sha256::new();
+        if std::io::copy(&mut f, &mut hasher).is_err() { return Ok(Value::Nil); }
+        Ok(Value::String(format!("{:x}", hasher.finalize())))
+    });
     b!("file-delete", |args| {
         let p = one_path(args, "file-delete")?;
         std::fs::remove_file(p).map(|_| Value::Bool(true))

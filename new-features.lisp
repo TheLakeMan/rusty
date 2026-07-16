@@ -147,3 +147,26 @@
 (println (string? (file-realpath "Cargo.toml")))        ; resolves to a real path: #t
 (println (file-symlink? "/tmp/rusty-nope-xyz"))         ; missing path: #f
 (println (nil? (file-realpath "/tmp/rusty-nope-xyz")))  ; unresolvable: nil
+
+;; ── file-hash (v0.45.0) ─────────────────────────────────────────────────
+;; Known-answer test: these are the published SHA-256 vectors for "abc" and
+;; for the empty input, so this pins us to real SHA-256 — not merely to
+;; whatever we happen to compute today. Fixtures live under /tmp, like
+;; pkg-test.lisp's; the real ~/.rusty is never touched.
+(println "-- file-hash --")
+(file-write "/tmp/rusty-hash-abc.txt" "abc")
+(file-write "/tmp/rusty-hash-empty.txt" "")
+(println (file-hash "/tmp/rusty-hash-abc.txt"))
+(println (file-hash "/tmp/rusty-hash-empty.txt"))
+(println (nil? (file-hash "/tmp/rusty-nope-xyz")))     ; unreadable: nil
+;; content, not path, decides the hash — and a one-byte edit changes it
+(file-write "/tmp/rusty-hash-copy.txt" "abc")
+(println (equal? (file-hash "/tmp/rusty-hash-abc.txt")
+                 (file-hash "/tmp/rusty-hash-copy.txt")))
+(file-write "/tmp/rusty-hash-copy.txt" "abd")
+(println (equal? (file-hash "/tmp/rusty-hash-abc.txt")
+                 (file-hash "/tmp/rusty-hash-copy.txt")))
+(file-delete "/tmp/rusty-hash-abc.txt")
+(file-delete "/tmp/rusty-hash-empty.txt")
+(file-delete "/tmp/rusty-hash-copy.txt")
+(println (nil? (file-hash "/tmp/rusty-hash-abc.txt")))  ; deleted: nil again
