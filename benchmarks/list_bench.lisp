@@ -20,8 +20,12 @@
 ;;   by direct call, parallel across cores >=16k states (RUSTY_CE_THREADS
 ;;   overrides). Drone x-axis proof, 79,992 states: interpreted 2.25 s ->
 ;;   native serial 2.7 ms (~840x) -> native parallel 1.2 ms (~1,890x).
-;; cons itself still copies per call (documented O(n) — build with
-;; accumulate+reverse or range, both linear).
+;;   v0.53.0 (amortized-O(1) cons — LSlice::prepend with the exposure-floor
+;;   guard, env.rs): cons-build-10k 0.891 -> 0.0084 s (~106x), linear at
+;;   scale (100k 84 ms, 1M 871 ms; the old asymptote put 1M at ~2.5 h).
+;;   fib25/cdr-walk/let-500k unchanged; symreg_bench -4%, agent_bench -7%.
+;;   Aliased tails (cons onto a cdr, double cons onto one list) still copy
+;;   — checked by adversarial aliasing tests; goldens bit-identical.
 
 (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
 (print (list 'fib25 (time (fib 25))))

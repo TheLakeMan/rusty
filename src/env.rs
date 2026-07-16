@@ -20,6 +20,31 @@ pub fn gensym_name(prefix: &str) -> String {
     format!("{}__{}", prefix, n)
 }
 
+/// The backing store of a list: element cells plus the exposure watermark
+/// that makes O(1) `cons` sound (0.53.0). `floor` is the MINIMUM start any
+/// LSlice on this buffer has ever had — monotonically decreasing — so every
+/// slot below `floor` has never been visible to any view, live or dead, and
+/// `cons` may claim slot `floor-1` in place even while the buffer is shared.
+/// Cells are `UnsafeCell` (repr(transparent), so a cell range reads as
+/// `&[Value]`) purely to make that one never-exposed-slot write legal; gap
+/// slots hold `Nil` until claimed. Single-threaded by construction (`Rc`).
+struct ListBuf {
+    cells: Vec<std::cell::UnsafeCell<Value>>,
+    floor: std::cell::Cell<usize>,
+}
+
+impl ListBuf {
+    /// gap Nil-slots in front, then `head`, then `tail` — the layout the
+    /// cons slow path allocates so subsequent conses are O(1) in-place.
+    fn with_gap(gap: usize, head: Value, tail: &[Value]) -> LSlice {
+        let mut cells = Vec::with_capacity(gap + 1 + tail.len());
+        for _ in 0..gap { cells.push(std::cell::UnsafeCell::new(Value::Nil)); }
+        cells.push(std::cell::UnsafeCell::new(head));
+        for v in tail { cells.push(std::cell::UnsafeCell::new(v.clone())); }
+        LSlice { data: Rc::new(ListBuf { cells, floor: std::cell::Cell::new(gap) }), start: gap }
+    }
+}
+
 /// A shared list slice: an Rc'd buffer plus a start offset. Cloning is an
 /// O(1) refcount bump (as before), and `tail()` — the representation of
 /// `cdr` — is O(1) too: same buffer, offset bumped by one. Before this,
@@ -30,18 +55,29 @@ pub fn gensym_name(prefix: &str) -> String {
 /// old `Rc<Vec<Value>>` contents. Trade-off (deliberate, same as slices
 /// everywhere): a live tail keeps the WHOLE original buffer alive — a
 /// 1-element cdr chain end pins its 30k-element ancestor until dropped.
-/// `cons` still copies (prepending can't share a buffer that grows left);
-/// build lists with accumulate+reverse or `range`, both linear.
-#[derive(Clone, Debug)]
+///
+/// `cons` is amortized O(1) since 0.53.0: it claims the never-exposed slot
+/// in front when `start == floor` (see `ListBuf` — the accumulate idiom
+/// hits this every iteration, live clones of the tail included, because
+/// the guard is on view ranges, not refcounts), and otherwise copies into
+/// a fresh buffer with a proportional front gap so the NEXT cons is O(1).
+/// Aliased tails (cons onto a cdr, two conses onto one list) fail the
+/// guard and copy — value semantics are observably unchanged.
+#[derive(Clone)]
 pub struct LSlice {
-    data:  Rc<Vec<Value>>,
+    data:  Rc<ListBuf>,
     start: usize,
 }
 
 impl LSlice {
-    pub fn new(vals: Vec<Value>) -> Self { LSlice { data: Rc::new(vals), start: 0 } }
+    pub fn new(vals: Vec<Value>) -> Self {
+        let cells: Vec<std::cell::UnsafeCell<Value>> =
+            vals.into_iter().map(std::cell::UnsafeCell::new).collect();
+        LSlice { data: Rc::new(ListBuf { cells, floor: std::cell::Cell::new(0) }), start: 0 }
+    }
     /// O(1) suffix: same buffer, offset advanced by n (n ≤ len; n == len
-    /// gives the empty list). Backs cdr, member, and list-tail.
+    /// gives the empty list). Backs cdr, member, and list-tail. Only ever
+    /// RAISES the start, so `floor` is untouched.
     pub fn advance(&self, n: usize) -> LSlice {
         debug_assert!(n <= self.len(), "LSlice::advance past end");
         LSlice { data: self.data.clone(), start: self.start + n }
@@ -51,12 +87,42 @@ impl LSlice {
         debug_assert!(!self.is_empty(), "LSlice::tail of empty list");
         self.advance(1)
     }
+    /// Amortized-O(1) prepend. Fast path: `start == floor && start > 0`
+    /// means slot `start-1` was never inside any view — claim it in place.
+    /// Slow path: copy into a fresh buffer with a front gap proportional
+    /// to the length (Vec-doubling amortization, leftward).
+    pub fn prepend(&self, head: Value) -> LSlice {
+        if self.start > 0 && self.start == self.data.floor.get() {
+            // Sound: no LSlice (live or dead) ever exposed a start below
+            // `floor`, so no `&[Value]` view can include slot start-1; the
+            // old value there is an unclaimed gap Nil.
+            unsafe { *self.data.cells[self.start - 1].get() = head; }
+            self.data.floor.set(self.start - 1);
+            return LSlice { data: self.data.clone(), start: self.start - 1 };
+        }
+        ListBuf::with_gap((self.len() + 1).max(4), head, self)
+    }
 }
 
 impl std::ops::Deref for LSlice {
     type Target = [Value];
     #[inline]
-    fn deref(&self) -> &[Value] { &self.data[self.start..] }
+    fn deref(&self) -> &[Value] {
+        // UnsafeCell<Value> is repr(transparent); slots at start.. are never
+        // written after exposure (prepend only touches slots below floor).
+        unsafe {
+            std::slice::from_raw_parts(
+                self.data.cells.as_ptr().add(self.start) as *const Value,
+                self.data.cells.len() - self.start,
+            )
+        }
+    }
+}
+
+impl std::fmt::Debug for LSlice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (**self).fmt(f)
+    }
 }
 
 /// A Rusty value.
@@ -259,12 +325,9 @@ pub fn list(vals: Vec<Value>) -> Value {
 
 pub fn cons(head: Value, tail: Value) -> Value {
     match tail {
-        Value::List(rc) => {
-            let mut v = vec![head];
-            v.extend_from_slice(&rc);
-            list(v)
-        }
-        Value::Nil => list(vec![head]),
+        Value::List(rc) => Value::List(rc.prepend(head)),
+        // A build starting from '() gets a small runway too.
+        Value::Nil => Value::List(ListBuf::with_gap(4, head, &[])),
         other      => list(vec![head, other]),
     }
 }
