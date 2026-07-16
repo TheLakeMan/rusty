@@ -11,18 +11,26 @@
 ;;; Why absolutes drift: these are wall-clock on whatever machine/thermal state
 ;;; you run them on. The RATIO is the durable claim — see ROADMAP 3.1.
 ;;;
-;;; v0.43.0 (2026-07-15) — JIT marshalling cut. A/B on one machine state, this
-;;; file, medians of 3:
-;;;   64x256->64 x100   JIT 143.3 ms -> 130.6 ms  (-8.9%)
-;;;   8x16->8   x1000   JIT   6.18 ms ->   5.78 ms (-6.5%)
-;;; graph-grad (interpreted) unchanged, as expected — the fix is codegen-only:
-;;; the generated kernel borrowed its input tensors instead of copying them in
-;;; (`.to_vec()` per input, ~295 KB/call at the medium shape) and stopped
-;;; cloning on the SumTo same-shape identity (~164 KB/call). Verified
-;;; bit-identical to graph-grad across 5 shapes / 37,353 values.
-;;; NOTE the JIT is still ~5% SLOWER than the interpreter at 64x256->64 — the
-;;; gap narrowed (~1.12x -> ~1.06x slower), it did not flip. Fusing still only
-;;; pays at small shapes.
+;;; JIT marshalling, cut in two passes. Each A/B'd on one machine state with
+;;; this file, medians of 3; every step verified bit-identical to graph-grad
+;;; across 5 shapes / 37,353 values.
+;;;
+;;; v0.43.0 — the generated kernel stopped copying: it borrows its input tensors
+;;;   (was `.to_vec()` per input, ~295 KB/call at 64x256->64) and borrows on the
+;;;   SumTo same-shape identity (was a clone, ~164 KB/call).
+;;;     64x256->64 x100   JIT 143.3 ms -> 130.6 ms  (-8.9%)
+;;;     8x16->8   x1000   JIT   6.18 ms ->   5.78 ms (-6.5%)
+;;;   Narrowed the gap to the interpreter but did NOT flip it (~5% slower still).
+;;;
+;;; v0.44.0 — per-argument-pointer ABI: the caller stopped copying too (was one
+;;;   flat buffer in + one out, ~885 KB/call at 64x256->64).
+;;;     64x256->64 x100   JIT 127.5 ms -> 114.6 ms  (-10.1%)
+;;;     8x16->8   x1000   JIT ~5.78 ms -> ~5.75 ms  (flat — little to marshal)
+;;;   THIS FLIPPED IT: at 64x256->64 the JIT now BEATS graph-grad (~1.14x), where
+;;;   it had been ~1.12x slower. Cumulative 143.3 -> 114.6 ms (-20%).
+;;;
+;;; graph-grad (interpreted) is untouched by both — the medium interpreted row
+;;; is noisy (~117-134 ms run to run), so compare JIT numbers, which are stable.
 ;;;
 ;;; Loss = mean((relu(xW+b) - t)^2). The graph IR has no capture, so everything
 ;;; the loss needs is a param or a literal; the mean divisor is passed as `nn`.

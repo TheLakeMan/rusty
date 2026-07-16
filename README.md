@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.43.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.44.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -426,11 +426,11 @@ rejected (reduce with `tensor-sum` or a mean).
 Same workloads, fused vs interpreted (results bit-identical): the 8×16→8
 training loop drops ~34ms → **~5.8ms** (~6×, and **~36×** vs the PyTorch
 number above) — compiling once replaces the graph rebuild that `graph-grad`
-pays on every call. At 64×256→64 fusing **still doesn't pay: ~131ms vs ~124ms
-interpreted (~5% slower)**, and both lose to BLAS, because naive-O(n³) matmul
-flops dominate — though that matmul itself got **~2.5× faster** in v0.20.0
+pays on every call. At 64×256→64 it's a much thinner **~1.14× (~114ms vs
+~119ms)**: naive-O(n³) matmul flops dominate both paths there, and BLAS still
+wins that shape — though that matmul itself got **~2.5× faster** in v0.20.0
 (slice-based ikj loops, same summation order, so every bit-for-bit claim still
-holds). **Fuse small graphs; at larger shapes measure before assuming.**
+holds). **The win from fusing shrinks as shapes grow; measure, don't assume.**
 Calling a kernel with differently-shaped tensors is an error — compile again
 for new shapes, as you would re-trace a JIT.
 

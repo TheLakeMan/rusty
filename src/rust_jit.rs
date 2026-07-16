@@ -475,11 +475,6 @@ pub fn compile_graph_grad(
         return Err("graph-grad: the loss must evaluate to a scalar (use tensor-sum or a mean)".into());
     }
 
-    // Input offsets, one per param, in param order.
-    let mut in_off = Vec::with_capacity(in_shapes.len());
-    let mut off = 0usize;
-    for s in in_shapes { in_off.push(off); off += ssize(s); }
-
     let mut body = String::new();
     for (i, node) in graph.nodes.iter().enumerate() {
         let a = node.args.first().copied().unwrap_or(0);
@@ -487,19 +482,19 @@ pub fn compile_graph_grad(
         let (sa, sb) = (node.args.first().map(|&x| &shapes[x]), node.args.get(1).map(|&x| &shapes[x]));
         let expr = match &node.op {
             Op::Const(bits) => format!("f64::from_bits({}u64) /* {:?} */", bits, f64::from_bits(*bits)),
+            // `inp` is one pointer per param (see the ABI note on the signature
+            // below), so a tensor param borrows the caller's own buffer in
+            // place: no copy in, and nothing to flatten. Every op below only
+            // reads its arguments (`.iter()`, indexing, slicing, `.as_ptr()`),
+            // so an owned Vec would buy nothing. The two sites that do need an
+            // owned value (`If` arms, `SumTo` identity) say so themselves with
+            // `.to_vec()`, which works on slice and Vec alike — that is what
+            // keeps the generated types uniform.
             Op::Param(p) => match &in_shapes[*p] {
-                None => format!("unsafe {{ *inp.add({}) }}", in_off[*p]),
-                // Borrow the caller's buffer instead of copying it in: every op
-                // below only reads its arguments (`.iter()`, indexing, slicing,
-                // `.as_ptr()`), so an owned Vec buys nothing and cost a full
-                // copy of every input tensor on every call. `inp` outlives the
-                // call, so the slice is valid for the whole body. The two sites
-                // that need an owned value (`If` arms, `SumTo` identity) say so
-                // themselves with `.to_vec()`, which works on slice and Vec
-                // alike — that is what keeps the generated types uniform.
+                None => format!("unsafe {{ *(*inp.add({})) }}", p),
                 Some(sh) => format!(
-                    "unsafe {{ std::slice::from_raw_parts(inp.add({}), {}) }}",
-                    in_off[*p], sh.iter().product::<usize>()),
+                    "unsafe {{ std::slice::from_raw_parts(*inp.add({}), {}) }}",
+                    p, sh.iter().product::<usize>()),
             },
             Op::Add => format!("v{} + v{}", a, b),
             Op::Sub => format!("v{} - v{}", a, b),
@@ -590,28 +585,27 @@ pub fn compile_graph_grad(
         body.push_str(&format!("    let v{} = {};\n", i, expr));
     }
 
-    // Outputs: loss at offset 0, then each gradient, flattened.
+    // Outputs: loss first, then each gradient — one caller-owned buffer each,
+    // written in place, so the caller never copies a result back out.
     let out_shapes: Vec<SShape> = outputs.iter().map(|&o| shapes[o].clone()).collect();
-    let mut out_off = 0usize;
-    for (&o, s) in outputs.iter().zip(&out_shapes) {
+    for (k, (&o, s)) in outputs.iter().zip(&out_shapes).enumerate() {
         match s {
-            None => body.push_str(&format!("    unsafe {{ *out.add({}) = v{}; }}\n", out_off, o)),
+            None => body.push_str(&format!("    unsafe {{ *(*out.add({})) = v{}; }}\n", k, o)),
             Some(sh) => body.push_str(&format!(
-                "    unsafe {{ std::ptr::copy_nonoverlapping(v{}.as_ptr(), out.add({}), {}); }}\n",
-                o, out_off, sh.iter().product::<usize>())),
+                "    unsafe {{ std::ptr::copy_nonoverlapping(v{}.as_ptr(), *out.add({}), {}); }}\n",
+                o, k, sh.iter().product::<usize>())),
         }
-        out_off += ssize(s);
     }
 
     let rust_name = sanitize_ident(name);
     let source = format!(
         "#[allow(unused_variables)]\n#[no_mangle]\n\
-         pub extern \"C\" fn {name}(inp: *const f64, out: *mut f64) {{\n{body}}}\n",
+         pub extern \"C\" fn {name}(inp: *const *const f64, out: *const *mut f64) {{\n{body}}}\n",
         name = rust_name, body = body,
     );
     let lib = build_lib(&source, &rust_name)?;
     let fn_ptr: *const () = unsafe {
-        let sym: libloading::Symbol<unsafe extern "C" fn(*const f64, *mut f64)> = lib
+        let sym: libloading::Symbol<unsafe extern "C" fn(*const *const f64, *const *mut f64)> = lib
             .get(rust_name.as_bytes())
             .map_err(|e| format!("graph-compile-grad: symbol '{}' not found: {}", rust_name, e))?;
         *sym as *const ()
@@ -625,9 +619,16 @@ pub fn compile_graph_grad(
     })
 }
 
-/// Marshal Lisp args into the flat input buffer, run a fused grad kernel,
-/// and unpack `(loss grad-per-param...)` — the exact result shape
-/// `graph-grad` produces. Shared by the eval dispatch and `apply`.
+/// Point a fused grad kernel at its arguments, run it, and return
+/// `(loss grad-per-param...)` — the exact result shape `graph-grad` produces.
+/// Shared by the eval dispatch and `apply`.
+///
+/// ABI: `fn(*const *const f64, *const *mut f64)` — one pointer per argument and
+/// one per output, rather than two flat buffers at static offsets. Tensors are
+/// already contiguous `Rc<Vec<f64>>`, so the kernel reads them where they lie
+/// and writes each result into the buffer that becomes that result's tensor:
+/// nothing is copied in or out. The flat-buffer ABI this replaced copied every
+/// input in and every output back (~885 KB per call on a 64×256→64 layer).
 pub fn call_native_grad(
     name: &str,
     fn_ptr: *const (),
@@ -638,11 +639,14 @@ pub fn call_native_grad(
     if args.len() != in_shapes.len() {
         return Err(format!("{}: expected {} arg(s), got {}", name, in_shapes.len(), args.len()));
     }
-    let mut inp: Vec<f64> = Vec::with_capacity(in_shapes.iter().map(ssize).sum());
+    // Validate, and stash scalar args. This Vec must be filled completely
+    // before any pointer into it is taken — a later push could reallocate and
+    // dangle the earlier ones.
+    let mut scalars: Vec<f64> = Vec::with_capacity(in_shapes.len());
     for (arg, want) in args.iter().zip(in_shapes) {
         match (arg, want) {
-            (Value::Number(n), None) => inp.push(*n),
-            (Value::Tensor { data, shape }, Some(sh)) if shape == sh => inp.extend(data.iter()),
+            (Value::Number(n), None) => scalars.push(*n),
+            (Value::Tensor { data: _, shape }, Some(sh)) if shape == sh => {}
             (Value::Tensor { shape, .. }, Some(sh)) => return Err(format!(
                 "{}: compiled for shape {:?}, got {:?} — run graph-compile-grad again for new shapes",
                 name, sh, shape)),
@@ -652,24 +656,30 @@ pub fn call_native_grad(
                 other)),
         }
     }
-    // (Skipping this zero-fill via with_capacity+set_len was measured at ~1% —
-    // inside the noise — and would make soundness here depend on the codegen
-    // covering every output slot. Not worth the coupling.)
-    let mut out = vec![0.0_f64; out_shapes.iter().map(ssize).sum()];
-    let f: unsafe extern "C" fn(*const f64, *mut f64) = unsafe { std::mem::transmute(fn_ptr) };
-    unsafe { f(inp.as_ptr(), out.as_mut_ptr()) };
 
-    let mut results = Vec::with_capacity(out_shapes.len());
-    let mut off = 0usize;
-    for s in out_shapes {
-        match s {
-            None => results.push(Value::Number(out[off])),
-            Some(sh) => results.push(Value::Tensor {
-                data: Rc::new(out[off..off + sh.iter().product::<usize>()].to_vec()),
-                shape: sh.clone(),
-            }),
+    // One pointer per argument: a tensor hands over its own buffer, so nothing
+    // is copied in. `args` (and the `Rc`s inside it) outlive the call, and
+    // `scalars` is complete, so every pointer stays valid for the whole call.
+    let mut si = 0usize;
+    let mut in_ptrs: Vec<*const f64> = Vec::with_capacity(args.len());
+    for arg in args {
+        match arg {
+            Value::Tensor { data, .. } => in_ptrs.push(data.as_ptr()),
+            _ => { in_ptrs.push(&scalars[si] as *const f64); si += 1; }
         }
-        off += ssize(s);
     }
+
+    // One buffer per output, written in place by the kernel, then handed
+    // straight to the Value — so a result is never copied back out either.
+    let mut out_bufs: Vec<Vec<f64>> = out_shapes.iter().map(|s| vec![0.0_f64; ssize(s)]).collect();
+    let mut out_ptrs: Vec<*mut f64> = out_bufs.iter_mut().map(|b| b.as_mut_ptr()).collect();
+
+    let f: unsafe extern "C" fn(*const *const f64, *const *mut f64) = unsafe { std::mem::transmute(fn_ptr) };
+    unsafe { f(in_ptrs.as_ptr(), out_ptrs.as_mut_ptr()) };
+
+    let results = out_bufs.into_iter().zip(out_shapes).map(|(buf, s)| match s {
+        None => Value::Number(buf[0]),
+        Some(sh) => Value::Tensor { data: Rc::new(buf), shape: sh.clone() },
+    }).collect();
     Ok(crate::env::list(results))
 }
