@@ -52,3 +52,29 @@ pub fn recycle_map(m: VarMap) {
         if pool.len() < FRAME_POOL_CAP { pool.push(m); }
     });
 }
+
+// ── Small-frame vec pool (0.54.0 hybrid frames) ─────────────────────────
+// Same discipline as the map pool, for the inline (String, Value) vecs
+// that back `Slots::Small`: cleared before recycling, thread-local,
+// capped. See env.rs `Slots` for why most frames never touch a map.
+
+type SmallVec = Vec<(String, crate::env::Value)>;
+
+thread_local! {
+    static SMALL_POOL: RefCell<Vec<SmallVec>> = RefCell::new(Vec::new());
+}
+
+/// Take a recycled (empty, capacity-preserving) small vec, or a fresh one.
+pub fn take_small() -> SmallVec {
+    SMALL_POOL.try_with(|p| p.borrow_mut().pop()).ok().flatten().unwrap_or_default()
+}
+
+/// Return a small vec to the pool. Caller passes it *already cleared* —
+/// clearing drops values, which can recursively drop other EnvFrames.
+pub fn recycle_small(v: SmallVec) {
+    debug_assert!(v.is_empty());
+    let _ = SMALL_POOL.try_with(|p| {
+        let mut pool = p.borrow_mut();
+        if pool.len() < FRAME_POOL_CAP { pool.push(v); }
+    });
+}

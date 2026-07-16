@@ -177,8 +177,8 @@ fn main() {
                 }));
             }
             "textDocument/completion" => {
-                let mut names: Vec<String> =
-                    genv.borrow().vars.keys().cloned().collect();
+                let mut names: Vec<String> = Vec::new();
+                    genv.borrow().for_each_local(|k, _| names.push(k.clone()));
                 names.extend(crate::eval::SPECIAL_FORMS.iter().map(|s| s.to_string()));
                 names.sort();
                 names.dedup();
@@ -194,7 +194,7 @@ fn main() {
                 let hover = docs.get(uri)
                     .and_then(|text| word_at(text, line, ch))
                     .and_then(|word| {
-                        let v = genv.borrow().vars.get(&word).cloned();
+                        let v = crate::env::EnvFrame::get(&genv, &word);
                         v.map(|v| format!("**{}** — {}", word, describe(&v)))
                             .or_else(|| crate::eval::SPECIAL_FORMS.contains(&word.as_str())
                                 .then(|| format!("**{}** — special form (see docs/SPEC.md §6)", word)))

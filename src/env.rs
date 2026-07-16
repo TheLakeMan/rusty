@@ -250,44 +250,127 @@ impl std::fmt::Display for Value {
 /// Shared, ref-counted environment frame.
 pub type Env = Rc<RefCell<EnvFrame>>;
 
+/// Frame storage (0.54.0 hybrid): almost every frame binds 1–3 names
+/// (lambda params, let bindings), where a linear scan over an inline vec
+/// beats hashing (measured 1.7× on the frame-op mix). A frame starts
+/// `Small` (insertion-ordered, pooled vec) and promotes to the pooled
+/// `Map` the moment it exceeds SMALL_MAX names — the global frame promotes
+/// almost immediately, so the walk order cold paths see there (checkpoint,
+/// command-registry, LSP completion) is the same hash order as before.
+#[derive(Debug)]
+pub enum Slots {
+    Small(Vec<(String, Value)>),
+    Map(VarMap),
+}
+
+/// Promotion threshold: params/let bindings rarely exceed this; a body
+/// with many `define`s promotes once and stays a map.
+const SMALL_MAX: usize = 8;
+
 #[derive(Debug)]
 pub struct EnvFrame {
-    pub vars:   VarMap,
+    slots: Slots,
     pub parent: Option<Env>,
 }
 
-// Frame maps are pooled (Phase 3.3 memory pooling — see src/arena.rs):
-// construction takes a recycled map, Drop hands the cleared map back.
+// Frame storage is pooled (Phase 3.3 memory pooling — see src/arena.rs):
+// construction takes a recycled small vec, promotion takes a recycled map,
+// Drop hands the cleared container back.
 impl Drop for EnvFrame {
     fn drop(&mut self) {
-        if self.vars.capacity() == 0 { return; } // never allocated — nothing to recycle
-        let mut m = std::mem::take(&mut self.vars);
         // Clear BEFORE touching the pool: dropping the contained values can
         // recursively drop other EnvFrames, which also borrow the pool.
-        m.clear();
-        crate::arena::recycle_map(m);
+        match std::mem::replace(&mut self.slots, Slots::Small(Vec::new())) {
+            Slots::Small(mut v) => {
+                if v.capacity() == 0 { return; }
+                v.clear();
+                crate::arena::recycle_small(v);
+            }
+            Slots::Map(mut m) => {
+                if m.capacity() == 0 { return; }
+                m.clear();
+                crate::arena::recycle_map(m);
+            }
+        }
     }
 }
 
 impl EnvFrame {
     pub fn new(parent: Option<Env>) -> Env {
-        Rc::new(RefCell::new(EnvFrame { vars: crate::arena::take_map(), parent }))
+        Rc::new(RefCell::new(EnvFrame { slots: Slots::Small(crate::arena::take_small()), parent }))
+    }
+
+    /// Local-frame lookup+clone (no parent walk).
+    #[inline]
+    fn get_here(&self, name: &str) -> Option<Value> {
+        match &self.slots {
+            Slots::Small(v) => v.iter().find(|(k, _)| k == name).map(|(_, val)| val.clone()),
+            Slots::Map(m) => m.get(name).cloned(),
+        }
+    }
+
+    #[inline]
+    fn has_here(&self, name: &str) -> bool {
+        match &self.slots {
+            Slots::Small(v) => v.iter().any(|(k, _)| k == name),
+            Slots::Map(m) => m.contains_key(name),
+        }
+    }
+
+    /// Bind or rebind `name` in THIS frame, promoting Small → Map past
+    /// SMALL_MAX distinct names.
+    fn insert_here(&mut self, name: String, value: Value) {
+        match &mut self.slots {
+            Slots::Small(v) => {
+                if let Some(slot) = v.iter_mut().find(|(k, _)| *k == name) {
+                    slot.1 = value;
+                    return;
+                }
+                if v.len() < SMALL_MAX {
+                    v.push((name, value));
+                    return;
+                }
+                let mut m = crate::arena::take_map();
+                for (k, val) in v.drain(..) { m.insert(k, val); }
+                m.insert(name, value);
+                let old = std::mem::replace(&mut self.slots, Slots::Map(m));
+                if let Slots::Small(sv) = old { crate::arena::recycle_small(sv); }
+            }
+            Slots::Map(m) => { m.insert(name, value); }
+        }
+    }
+
+    /// Visit every binding in THIS frame (cold-path API: checkpoint,
+    /// command-registry, LSP completion, did-you-mean).
+    pub fn for_each_local<F: FnMut(&String, &Value)>(&self, mut f: F) {
+        match &self.slots {
+            Slots::Small(v) => { for (k, val) in v { f(k, val); } }
+            Slots::Map(m) => { for (k, val) in m { f(k, val); } }
+        }
+    }
+
+    /// Snapshot of this frame's bindings as a plain map (cold paths that
+    /// used to clone `.vars`).
+    pub fn vars_snapshot(&self) -> VarMap {
+        let mut out = VarMap::default();
+        self.for_each_local(|k, v| { out.insert(k.clone(), v.clone()); });
+        out
     }
 
     pub fn get(env: &Env, name: &str) -> Option<Value> {
         let frame = env.borrow();
-        if let Some(v) = frame.vars.get(name) { return Some(v.clone()); }
+        if let Some(v) = frame.get_here(name) { return Some(v); }
         frame.parent.as_ref().and_then(|p| EnvFrame::get(p, name))
     }
 
     pub fn set(env: &Env, name: String, value: Value) {
-        env.borrow_mut().vars.insert(name, value);
+        env.borrow_mut().insert_here(name, value);
     }
 
     pub fn set_existing(env: &Env, name: &str, value: Value) -> bool {
         let mut frame = env.borrow_mut();
-        if frame.vars.contains_key(name) {
-            frame.vars.insert(name.to_string(), value);
+        if frame.has_here(name) {
+            frame.insert_here(name.to_string(), value);
             true
         } else if let Some(ref parent) = frame.parent.clone() {
             EnvFrame::set_existing(parent, name, value)

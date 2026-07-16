@@ -40,7 +40,7 @@ fn with_baseline<R>(f: impl FnOnce(&VarMap) -> R) -> R {
         if b.borrow().is_none() {
             let env = crate::interp::make_env();
             crate::interp::load_stdlib(&env, &crate::eval::Evaluator::new());
-            let vars = env.borrow().vars.clone();
+            let vars = env.borrow().vars_snapshot();
             *b.borrow_mut() = Some(vars);
         }
         f(b.borrow().as_ref().unwrap())
@@ -167,7 +167,7 @@ pub fn write_checkpoint(path: &str, env: &Env) -> Result<Value, String> {
         let parent = root.borrow().parent.clone();
         match parent { Some(p) => root = p, None => break }
     }
-    let vars = root.borrow().vars.clone();
+    let vars = root.borrow().vars_snapshot();
     let mut names: Vec<&String> = vars.keys().collect();
     names.sort(); // deterministic output
 

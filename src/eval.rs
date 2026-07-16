@@ -59,7 +59,7 @@ fn undefined_error(env: &Env, name: &str) -> String {
     for sf in SPECIAL_FORMS { consider(sf); }
     let mut frame = Some(env.clone());
     while let Some(f) = frame {
-        for k in f.borrow().vars.keys() { consider(k); }
+        f.borrow().for_each_local(|k, _| consider(k));
         let parent = f.borrow().parent.clone();
         frame = parent;
     }
@@ -327,7 +327,7 @@ impl Evaluator {
                                 let mut tools = Vec::new();
                                 fn collect_tools(env: &Env, out: &mut Vec<Value>) {
                                     let frame = env.borrow();
-                                    for (name, v) in &frame.vars {
+                                    frame.for_each_local(|name, v| {
                                         if let Value::Tool { description, params, .. } = v {
                                             out.push(crate::env::list(vec![
                                                 Value::Symbol(name.clone()),
@@ -335,7 +335,7 @@ impl Evaluator {
                                                 crate::env::list(params.iter().map(|p| Value::Symbol(p.clone())).collect()),
                                             ]));
                                         }
-                                    }
+                                    });
                                     if let Some(ref parent) = frame.parent {
                                         collect_tools(parent, out);
                                     }
@@ -367,7 +367,7 @@ impl Evaluator {
                                 let mut tool_descs = String::new();
                                 {
                                     let frame = env.borrow();
-                                    for (_, v) in &frame.vars {
+                                    frame.for_each_local(|_, v| {
                                         if let Value::Tool { name, description, params, .. } = v {
                                             tool_descs.push_str(&format!(
                                                 "- {}{}: {}\n",
@@ -377,7 +377,7 @@ impl Evaluator {
                                                 description
                                             ));
                                         }
-                                    }
+                                    });
                                 }
 
                                 let system = format!(
@@ -512,7 +512,7 @@ impl Evaluator {
                                     match next { Some(p) => root = p, None => break }
                                 }
                                 let mut rows: Vec<Value> = Vec::new();
-                                for (name, val) in root.borrow().vars.iter() {
+                                root.borrow().for_each_local(|name, val| {
                                     let (kind, sig) = match val {
                                         Value::Builtin(..) => ("builtin", String::new()),
                                         Value::Lambda { params, rest, .. } =>
@@ -523,7 +523,7 @@ impl Evaluator {
                                             ("function", fmt_sig(name, params, &None)),
                                         Value::Native { .. } | Value::NativeGrad { .. } =>
                                             ("function", String::new()),
-                                        _ => continue, // plain data bindings aren't commands
+                                        _ => return, // plain data bindings aren't commands
                                     };
                                     let cat = crate::interp::category_of(name)
                                         .unwrap_or_else(|| "other".to_string());
@@ -533,7 +533,7 @@ impl Evaluator {
                                         Value::String(sig),
                                         Value::Symbol(cat),
                                     ]));
-                                }
+                                });
                                 for sf in crate::eval::SPECIAL_FORMS {
                                     rows.push(crate::env::list(vec![
                                         Value::String((*sf).to_string()),

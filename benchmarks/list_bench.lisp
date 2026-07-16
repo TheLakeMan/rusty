@@ -26,6 +26,12 @@
 ;;   fib25/cdr-walk/let-500k unchanged; symreg_bench -4%, agent_bench -7%.
 ;;   Aliased tails (cons onto a cdr, double cons onto one list) still copy
 ;;   — checked by adversarial aliasing tests; goldens bit-identical.
+;;   v0.54.0 (hybrid small frames — Slots::Small linear-scan vec <=8 names,
+;;   pooled, promoting to the pooled FxHashMap past that; env.rs): frame-op
+;;   micro 1.7x, end-to-end fib25 0.150 -> 0.130 s (-13%), let-500k
+;;   0.511 -> 0.469 s (-8%), symreg_bench 3.06 -> 2.79 s (-9%),
+;;   cdr-walk-30k -13%. Cold paths (checkpoint, command-registry, LSP,
+;;   did-you-mean) moved to for_each_local/vars_snapshot accessors.
 
 (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
 (print (list 'fib25 (time (fib 25))))
