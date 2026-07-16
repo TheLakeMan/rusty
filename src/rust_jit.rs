@@ -548,20 +548,34 @@ pub fn compile_graph_grad(
             Op::MatMul => {
                 let (x, y) = (sa.unwrap().as_ref().unwrap(), sb.unwrap().as_ref().unwrap());
                 let (m, k, n) = (x[0], x[1], y[1]);
-                // ikj order with row slices: same per-element accumulation
-                // order as the interpreter's t_matmul (p ascending — results
-                // stay bit-identical), but contiguous access on both sides
-                // and an inner loop that is elementwise FMA into distinct
-                // slots, so LLVM can vectorize it without reassociating.
-                format!(
-                    "{{ let mut o = vec![0.0_f64; {m} * {n}]; \
-                       for i in 0..{m} {{ \
-                       let a_row = &v{a}[i * {k}..(i + 1) * {k}]; \
-                       let o_row = &mut o[i * {n}..(i + 1) * {n}]; \
-                       for p in 0..{k} {{ let x = a_row[p]; \
-                       let b_row = &v{b}[p * {n}..(p + 1) * {n}]; \
-                       for j in 0..{n} {{ o_row[j] += x * b_row[j]; }} }} }} o }}",
-                    m = m, k = k, n = n, a = a, b = b)
+                if m >= 2 && m * k * n >= crate::graph_ir::MM_POOL_MIN_MULADDS {
+                    // Over the pool crossover (shapes are compile-time
+                    // constants, so this is a codegen-time decision): call
+                    // back into the host's row-parallel pool — the SAME pool
+                    // and kernel body the interpreter's matmuls use, so bits
+                    // are inherited, not re-proven. `o` is zeroed here, as
+                    // mm_bridge requires.
+                    format!(
+                        "{{ let mut o = vec![0.0_f64; {m} * {n}]; \
+                           mm(v{a}.as_ptr(), v{a}.len(), v{b}.as_ptr(), v{b}.len(), \
+                           o.as_mut_ptr(), {m}, {k}, {n}); o }}",
+                        m = m, k = k, n = n, a = a, b = b)
+                } else {
+                    // ikj order with row slices: same per-element accumulation
+                    // order as the interpreter's t_matmul (p ascending — results
+                    // stay bit-identical), but contiguous access on both sides
+                    // and an inner loop that is elementwise FMA into distinct
+                    // slots, so LLVM can vectorize it without reassociating.
+                    format!(
+                        "{{ let mut o = vec![0.0_f64; {m} * {n}]; \
+                           for i in 0..{m} {{ \
+                           let a_row = &v{a}[i * {k}..(i + 1) * {k}]; \
+                           let o_row = &mut o[i * {n}..(i + 1) * {n}]; \
+                           for p in 0..{k} {{ let x = a_row[p]; \
+                           let b_row = &v{b}[p * {n}..(p + 1) * {n}]; \
+                           for j in 0..{n} {{ o_row[j] += x * b_row[j]; }} }} }} o }}",
+                        m = m, k = k, n = n, a = a, b = b)
+                }
             }
             Op::Transpose => {
                 let x = sa.unwrap().as_ref().unwrap();
@@ -617,12 +631,13 @@ pub fn compile_graph_grad(
     let rust_name = sanitize_ident(name);
     let source = format!(
         "#[allow(unused_variables)]\n#[no_mangle]\n\
-         pub extern \"C\" fn {name}(inp: *const *const f64, out: *const *mut f64) {{\n{body}}}\n",
+         pub extern \"C\" fn {name}(inp: *const *const f64, out: *const *mut f64, \
+         mm: extern \"C\" fn(*const f64, usize, *const f64, usize, *mut f64, usize, usize, usize)) {{\n{body}}}\n",
         name = rust_name, body = body,
     );
     let lib = build_lib(&source, &rust_name)?;
     let fn_ptr: *const () = unsafe {
-        let sym: libloading::Symbol<unsafe extern "C" fn(*const *const f64, *const *mut f64)> = lib
+        let sym: libloading::Symbol<GradKernelFn> = lib
             .get(rust_name.as_bytes())
             .map_err(|e| format!("graph-compile-grad: symbol '{}' not found: {}", rust_name, e))?;
         *sym as *const ()
@@ -640,12 +655,19 @@ pub fn compile_graph_grad(
 /// `(loss grad-per-param...)` — the exact result shape `graph-grad` produces.
 /// Shared by the eval dispatch and `apply`.
 ///
-/// ABI: `fn(*const *const f64, *const *mut f64)` — one pointer per argument and
-/// one per output, rather than two flat buffers at static offsets. Tensors are
-/// already contiguous `Rc<Vec<f64>>`, so the kernel reads them where they lie
-/// and writes each result into the buffer that becomes that result's tensor:
-/// nothing is copied in or out. The flat-buffer ABI this replaced copied every
-/// input in and every output back (~885 KB per call on a 64×256→64 layer).
+/// ABI: `fn(*const *const f64, *const *mut f64, MmBridgeFn)` — one pointer per
+/// argument and one per output, rather than two flat buffers at static offsets.
+/// Tensors are already contiguous `Rc<Vec<f64>>`, so the kernel reads them
+/// where they lie and writes each result into the buffer that becomes that
+/// result's tensor: nothing is copied in or out. (The flat-buffer ABI this
+/// replaced copied every input in and every output back — ~885 KB per call on
+/// a 64×256→64 layer.) The third parameter (0.52.0) hands the kernel the
+/// host's row-parallel matmul bridge; codegen only emits calls to it for
+/// matmuls over the pool crossover. Passed per call rather than baked into the
+/// generated source, which must stay address-free to be cacheable on disk.
+pub type MmBridgeFn = extern "C" fn(*const f64, usize, *const f64, usize, *mut f64, usize, usize, usize);
+type GradKernelFn = unsafe extern "C" fn(*const *const f64, *const *mut f64, MmBridgeFn);
+
 pub fn call_native_grad(
     name: &str,
     fn_ptr: *const (),
@@ -691,8 +713,8 @@ pub fn call_native_grad(
     let mut out_bufs: Vec<Vec<f64>> = out_shapes.iter().map(|s| vec![0.0_f64; ssize(s)]).collect();
     let mut out_ptrs: Vec<*mut f64> = out_bufs.iter_mut().map(|b| b.as_mut_ptr()).collect();
 
-    let f: unsafe extern "C" fn(*const *const f64, *const *mut f64) = unsafe { std::mem::transmute(fn_ptr) };
-    unsafe { f(in_ptrs.as_ptr(), out_ptrs.as_mut_ptr()) };
+    let f: GradKernelFn = unsafe { std::mem::transmute(fn_ptr) };
+    unsafe { f(in_ptrs.as_ptr(), out_ptrs.as_mut_ptr(), crate::graph_ir::mm_bridge) };
 
     let results = out_bufs.into_iter().zip(out_shapes).map(|(buf, s)| match s {
         None => Value::Number(buf[0]),

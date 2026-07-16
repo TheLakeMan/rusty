@@ -70,6 +70,20 @@
 ;;;   quality comparison). Report threaded-Rusty numbers as their own row,
 ;;;   never against the 1-thread torch row.
 ;;;
+;;; v0.52.0 — fused grad kernels reach the same pool: the NativeGrad ABI grew
+;;;   a third parameter (graph_ir::mm_bridge) and codegen emits a bridge call
+;;;   for matmuls over the crossover (static decision — shapes are
+;;;   compile-time constants), keeping inline loops under it. Bits inherited
+;;;   from v0.51.0, and re-proven: interp-vs-JIT exact equality on 4 shapes
+;;;   (incl. relu-boundary: zeroed input row + zero bias), serial-vs-pooled
+;;;   save-model diff byte-identical (5.9 MB), both final losses unchanged.
+;;;     64x256->64 x100  JIT ~98.7 -> ~76 ms median of 3 runs (-23%;
+;;;       cumulative 143.3 -> ~76, -47%). Row now shares the pool's
+;;;       run-to-run spread (70.6-78.2) — quote median with spread.
+;;;     8x16->8 x1000    unchanged ~5.7 ms (below crossover, inline path).
+;;;   JIT and interpreter are now neck-and-neck at medium (both pooled;
+;;;   remaining difference is inside the noise).
+;;;
 ;;; Loss = mean((relu(xW+b) - t)^2). The graph IR has no capture, so everything
 ;;; the loss needs is a param or a literal; the mean divisor is passed as `nn`.
 ;;; Inputs are integer-derived /8 — exactly representable, so Rusty and torch

@@ -629,21 +629,54 @@ mod mm_pool {
     }
 }
 
-/// Entry point shared by `t_matmul` and the `matmul` builtin. Row-parallel
-/// above the measured crossover (~64k mul-adds on the N95: pool dispatch is
-/// ~1.4 µs, so 32x64·64x32 is already 1.39x and the training shapes 2.1-2.3x;
-/// below it the pool is pure overhead), serial under it. `RUSTY_MM_THREADS`
-/// overrides the lane count (<=1 forces serial), mirroring RUSTY_CE_THREADS.
-pub fn matmul_ikj(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize) -> Vec<f64> {
-    let mut data = vec![0.0; n * m];
-    if n >= 2 && n * k * m >= 65536 {
+/// Mul-add count above which the pool pays its ~1.4 µs dispatch (measured
+/// on the N95: 32x64·64x32 is already 1.39x, the training shapes 2.1-2.3x;
+/// below it the pool is pure overhead). The JIT codegen consults the same
+/// constant when deciding statically whether a generated matmul calls back
+/// into the pool or stays an inline loop — one crossover, two consumers.
+pub const MM_POOL_MIN_MULADDS: usize = 65536;
+
+/// Accumulating core shared by `matmul_ikj` and the JIT bridge: `out` MUST
+/// arrive zeroed (every path `+=`s into it). Row-parallel above the
+/// crossover, serial under it. `RUSTY_MM_THREADS` overrides the lane count
+/// (<=1 forces serial), mirroring RUSTY_CE_THREADS.
+pub fn matmul_ikj_into(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize, out: &mut [f64]) {
+    if n >= 2 && n * k * m >= MM_POOL_MIN_MULADDS {
         if let Some(pool) = mm_pool::get() {
-            pool.matmul(xd, yd, n, k, m, &mut data);
-            return data;
+            pool.matmul(xd, yd, n, k, m, out);
+            return;
         }
     }
-    matmul_rows_dispatch(xd, yd, 0, n, k, m, &mut data);
+    matmul_rows_dispatch(xd, yd, 0, n, k, m, out);
+}
+
+/// Entry point shared by `t_matmul` and the `matmul` builtin.
+pub fn matmul_ikj(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize) -> Vec<f64> {
+    let mut data = vec![0.0; n * m];
+    matmul_ikj_into(xd, yd, n, k, m, &mut data);
     data
+}
+
+/// C-ABI matmul bridge handed to every fused grad kernel (third parameter of
+/// the NativeGrad ABI since 0.52.0): a generated kernel's over-crossover
+/// matmuls run on the SAME pool and kernel body as the interpreter's, so the
+/// JIT inherits v0.51.0's bit-identity instead of re-proving it. `out` must
+/// be zeroed (rows*cols), exactly like `matmul_ikj_into`.
+///
+/// Safety: called only from kernels invoked by `call_native_grad`, which
+/// keeps every argument and output buffer alive for the whole call.
+pub extern "C" fn mm_bridge(
+    a: *const f64, a_len: usize,
+    b: *const f64, b_len: usize,
+    out: *mut f64,
+    rows: usize, k: usize, cols: usize,
+) {
+    unsafe {
+        let a = std::slice::from_raw_parts(a, a_len);
+        let b = std::slice::from_raw_parts(b, b_len);
+        let out = std::slice::from_raw_parts_mut(out, rows * cols);
+        matmul_ikj_into(a, b, rows, k, cols, out);
+    }
 }
 
 fn t_matmul(a: &GVal, b: &GVal) -> Result<GVal, String> {
