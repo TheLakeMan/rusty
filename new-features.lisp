@@ -194,3 +194,22 @@
 ;; and came FIRST: parsing happens before evaluation, so a load is all-or-
 ;; nothing. A truncated file can't half-apply.
 (println (nil? (file-hash "/tmp/rusty-trunc.lisp")))
+
+;; ── safe-call-with-spec: enforce the spec you were HANDED (v0.48.0) ──────
+;; *tool-specs* is global, keyed by tool name, and deftool-spec replaces that
+;; name's entry — so a caller that certified a tool at boot cannot trust that
+;; the spec it certified is the one safe-call will look up later. It cannot even
+;; compare them: code values are never equal? to anything (SPEC §equality), and
+;; a precondition is a code value. safe-call-with-spec takes the spec, so a
+;; caller can hold onto the one it certified. wuwei's gate does exactly this.
+(println "-- safe-call-with-spec --")
+(deftool sc-echo (x) "Echo" (str "echoed " x))
+(deftool-spec sc-echo '((x string)) '() (lambda (x) (string-starts-with? x "ok")) '())
+(define PINNED (tool-spec 'sc-echo))
+(println (safe-call sc-echo "ok-1"))                       ; global spec: allowed
+(println (try-catch (safe-call sc-echo "no-1") (e) 'refused))
+;; Now REPLACE the spec — as a second tenant registering the same tool name would
+(deftool-spec sc-echo '((x string)) '() (lambda (x) (string-starts-with? x "zz")) '())
+(println (try-catch (safe-call sc-echo "ok-1") (e) 'refused))   ; global changed: now refused
+(println (safe-call-with-spec PINNED sc-echo "ok-1"))           ; pinned spec: still enforced
+(println (try-catch (safe-call-with-spec PINNED sc-echo "zz-1") (e) 'refused))

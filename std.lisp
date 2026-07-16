@@ -471,22 +471,35 @@
 ;; Contract-enforced invocation: arity, arg types, and precondition are all
 ;; checked BEFORE the tool body runs — a violated contract raises instead of
 ;; letting the tool fire on bad inputs (these tools touch the real system).
+;; The contract check against an EXPLICIT spec (0.48.0). safe-call is this with
+;; the spec looked up; they share one implementation so the checks can't drift.
+;;
+;; Why the split: *tool-specs* is global and keyed by tool NAME, and deftool-spec
+;; REPLACES that name's entry — so a caller that certified a tool at boot has no
+;; way to be sure the spec it certified is the one safe-call will find later.
+;; It can't even check: SPEC.md §equality says code values are never `equal?` to
+;; anything, so two preconditions cannot be compared, and a precondition is
+;; exactly what a re-registration changes. The answer is to hold the spec you
+;; certified and enforce THAT one. See wuwei's certificate dispatch.
+(define (safe-call-with-spec s tool . args)
+  (assert s (format "safe-call: no spec registered for ~a" (tool-name tool)))
+  (assert (= (length args) (length (spec-param-types s)))
+          (format "safe-call: ~a expects ~a arg(s), got ~a"
+                  (tool-name tool) (length (spec-param-types s)) (length args)))
+  (for-each
+    (lambda (pair)
+      (let ((arg (car pair)) (pt (cadr pair)))
+        (assert ((type-pred (cadr pt)) arg)
+                (format "safe-call: ~a: ~a must be ~a" (tool-name tool) (car pt) (cadr pt)))))
+    (zip args (spec-param-types s)))
+  (when (spec-pre s)
+    (assert (apply (spec-pre s) args)
+            (format "safe-call: ~a: precondition violated" (tool-name tool))))
+  (apply tool args))
+
 (define (safe-call tool . args)
-  (let ((s (tool-spec (tool-name tool))))
-    (assert s (format "safe-call: no spec registered for ~a" (tool-name tool)))
-    (assert (= (length args) (length (spec-param-types s)))
-            (format "safe-call: ~a expects ~a arg(s), got ~a"
-                    (tool-name tool) (length (spec-param-types s)) (length args)))
-    (for-each
-      (lambda (pair)
-        (let ((arg (car pair)) (pt (cadr pair)))
-          (assert ((type-pred (cadr pt)) arg)
-                  (format "safe-call: ~a: ~a must be ~a" (tool-name tool) (car pt) (cadr pt)))))
-      (zip args (spec-param-types s)))
-    (when (spec-pre s)
-      (assert (apply (spec-pre s) args)
-              (format "safe-call: ~a: precondition violated" (tool-name tool))))
-    (apply tool args)))
+  (apply safe-call-with-spec
+         (cons (tool-spec (tool-name tool)) (cons tool args))))
 
 ;; Effect honesty: every operation check-effects finds in the tool's body
 ;; must be covered by its declared effects list — a tool can't claim less
