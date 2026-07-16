@@ -47,8 +47,36 @@
 (shell "rm -rf /tmp/rusty-not-a-pkg && mkdir -p /tmp/rusty-not-a-pkg && cd /tmp/rusty-not-a-pkg && git init -q && git -c user.email=t@t -c user.name=t commit -qm empty --allow-empty")
 (print (try-catch (pkg-install "file:///tmp/rusty-not-a-pkg") (e) (list 'rejected e)))
 
+;; ── Integrity: is this still what I installed? ───────────────────────────
+;; Hashes themselves stay out of the golden (they'd be noise); what's pinned is
+;; the SHAPE: which files are covered, that .git is not, and that every kind of
+;; change is NAMED rather than merely counted.
+(define FP (pkg-fingerprint "rusty-pkg-dep"))
+(print (list 'fingerprint-covers (map car FP)))     ; sorted; no .git
+(print (list 'every-file-hashed (all? (lambda (r) (string? (cadr r))) FP)))
+(print (list 'fresh-install-has-no-drift (pkg-drift "rusty-pkg-dep")))
+
+;; Edit an installed file — the tamper a lock exists to catch.
+(file-append (string-append (pkg-dir "rusty-pkg-dep") "/dep.lisp") "\n(define sneaky 1)\n")
+(print (list 'edited-file-named (pkg-drift "rusty-pkg-dep")))
+;; ...and an out-of-band fingerprint (the honest kind) catches it too
+(print (list 'verify-vs-out-of-band-fp (pkg-verify "rusty-pkg-dep" FP)))
+
+;; A file that appeared, and one that vanished, are different words.
+(file-write (string-append (pkg-dir "rusty-pkg-dep") "/extra.lisp") "(define x 1)")
+(print (list 'added-file-named (pkg-verify "rusty-pkg-dep" FP)))
+(file-delete (string-append (pkg-dir "rusty-pkg-dep") "/extra.lisp"))
+(file-delete (string-append (pkg-dir "rusty-pkg-dep") "/dep.lisp"))
+(print (list 'missing-file-named (pkg-verify "rusty-pkg-dep" FP)))
+
+;; Absence of a lock is its own answer — never a clean bill of health.
+(file-delete (pkg-lock-path "rusty-pkg-dep"))
+(print (list 'no-lock-is-not-verified (pkg-drift "rusty-pkg-dep")))
+(print (list 'not-installed-is-not-verified (pkg-drift "no-such-package")))
+
 ;; ── Uninstall, leave the machine clean ───────────────────────────────────
 (print (pkg-remove "rusty-pkg-fix"))
+(print (list 'lock-removed-with-package (pkg-locked? "rusty-pkg-fix")))
 (print (pkg-remove "rusty-pkg-dep"))
 (print (pkg-remove "rusty-pkg-fix"))                ; already gone
 (shell "rm -rf /tmp/rusty-pkg-fix /tmp/rusty-pkg-dep /tmp/rusty-not-a-pkg")

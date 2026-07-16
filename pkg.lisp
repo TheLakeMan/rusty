@@ -55,6 +55,9 @@
                 (shell (format "rm -rf ~a" (pkg-dir name)))
                 (error (format "pkg-install: ~a is not a Rusty package (no package.lisp manifest)" url)))
               (let ((m (pkg-read-manifest (pkg-dir name))))
+                ;; Record what arrived, before anything else runs: this is the
+                ;; only moment we can honestly say "this is what was installed".
+                (pkg-lock! name)
                 (for-each (lambda (dep) (pkg-install dep))
                           (pkg-get m 'deps '()))
                 (list 'installed (pkg-get m 'name name)
@@ -82,8 +85,102 @@
            (dir-list (pkg-root)))
       '()))
 
+;; ── Integrity ────────────────────────────────────────────────────────────
+;; What you install from a git URL is whatever that URL served you. A
+;; fingerprint gives an installed package a comparable identity: every file
+;; under it with its SHA-256, sorted by path (dir-list sorts, so two machines
+;; that installed the same bytes agree exactly).
+;;
+;; HONEST SCOPE, twice over:
+;;   1. A fingerprint proves SAMENESS, not safety. Identical bytes to a
+;;      malicious package are still malicious. It answers "is this what I
+;;      installed / what the publisher meant?" — never "is this good?".
+;;   2. A fingerprint is only worth WHERE IT CAME FROM. One the package hands
+;;      you itself — in its own manifest, in its own repo — proves nothing:
+;;      whoever changes the files changes the manifest in the same commit.
+;;      That is why there is no (files ...) hash key in the manifest format;
+;;      it would look like a guarantee and be none. An expected fingerprint has
+;;      to reach you another way: the publisher's site, a release note, a
+;;      counterparty, or your own record from install day (that last one is
+;;      what pkg-lock! keeps, and it detects local drift only — an attacker on
+;;      your machine can rewrite the lock as easily as the package).
+;;
+;; .git is skipped: two clones of the same commit are not byte-identical there,
+;; so including it would make every fingerprint disagree with every other.
+;; Symlinks are followed (file-hash follows them), so a package that symlinks
+;; outside its own tree fingerprints its target's bytes, not the link.
+
+;; No is-a-directory? builtin exists; dir-list raises on a regular file, and
+;; that raise is the test.
+(define (pkg-dir? path)
+  (try-catch (begin (dir-list path) #t) (e) #f))
+
+(define (pkg-files dir prefix)
+  (foldl
+    (lambda (name acc)
+      (let ((full (string-append dir "/" name))
+            (rel  (string-append prefix name)))
+        (cond ((equal? name ".git") acc)
+              ((pkg-dir? full) (append acc (pkg-files full (string-append rel "/"))))
+              (else (append acc (list (list rel (file-hash full))))))))
+    '()
+    (dir-list dir)))
+
+;; -> ((relpath sha256) ...) sorted, or #f if not installed
+(define (pkg-fingerprint name)
+  (if (pkg-installed? name) (pkg-files (pkg-dir name) "") #f))
+
+(define (pkg-fp-lookup fp path)
+  (let ((hit (assoc path fp))) (if hit (cadr hit) #f)))
+
+;; Name what moved, per file: changed / missing / added. A verdict of "this
+;; package differs" without saying WHERE is not worth printing.
+(define (pkg-fp-diff expected got)
+  (append
+    (foldl (lambda (row acc)
+             (let ((g (pkg-fp-lookup got (car row))))
+               (cond ((not g) (append acc (list (list (car row) 'missing))))
+                     ((not (equal? g (cadr row))) (append acc (list (list (car row) 'changed))))
+                     (else acc))))
+           '() expected)
+    (foldl (lambda (row acc)
+             (if (pkg-fp-lookup expected (car row))
+                 acc
+                 (append acc (list (list (car row) 'added)))))
+           '() got)))
+
+;; 'verified | (changed ((path what) ...)) | (not-installed name)
+(define (pkg-verify name expected)
+  (let ((got (pkg-fingerprint name)))
+    (cond ((not got) (list 'not-installed name))
+          ((equal? got expected) 'verified)
+          (else (list 'changed (pkg-fp-diff expected got))))))
+
+;; Locks live OUTSIDE the package directory on purpose: a lock inside the tree
+;; it vouches for would be rewritten by the same `git pull` (or hand-edit) it
+;; is supposed to notice, and would change its own fingerprint besides.
+(define (pkg-lock-root) (string-append (shell "printf $HOME") "/.rusty/pkg-locks"))
+(define (pkg-lock-path name) (string-append (pkg-lock-root) "/" name ".json"))
+(define (pkg-locked? name) (file-exists? (pkg-lock-path name)))
+
+(define (pkg-lock! name)
+  (let ((fp (pkg-fingerprint name)))
+    (if (not fp)
+        (list 'not-installed name)
+        (begin (dir-create (pkg-lock-root))
+               (save-model (pkg-lock-path name) fp)
+               (list 'locked name (length fp))))))
+
+;; Has anything under an installed package changed since it was installed?
+;; 'verified | (changed ...) | (no-lock name) | (not-installed name)
+(define (pkg-drift name)
+  (cond ((not (pkg-installed? name)) (list 'not-installed name))
+        ((not (pkg-locked? name))    (list 'no-lock name))
+        (else (pkg-verify name (load-model (pkg-lock-path name))))))
+
 (define (pkg-remove name)
   (if (pkg-installed? name)
       (begin (shell (format "rm -rf ~a" (pkg-dir name)))
+             (if (pkg-locked? name) (file-delete (pkg-lock-path name)))
              (list 'removed name))
       (list 'not-installed name)))
