@@ -11,6 +11,19 @@
 ;;; Why absolutes drift: these are wall-clock on whatever machine/thermal state
 ;;; you run them on. The RATIO is the durable claim — see ROADMAP 3.1.
 ;;;
+;;; v0.43.0 (2026-07-15) — JIT marshalling cut. A/B on one machine state, this
+;;; file, medians of 3:
+;;;   64x256->64 x100   JIT 143.3 ms -> 130.6 ms  (-8.9%)
+;;;   8x16->8   x1000   JIT   6.18 ms ->   5.78 ms (-6.5%)
+;;; graph-grad (interpreted) unchanged, as expected — the fix is codegen-only:
+;;; the generated kernel borrowed its input tensors instead of copying them in
+;;; (`.to_vec()` per input, ~295 KB/call at the medium shape) and stopped
+;;; cloning on the SumTo same-shape identity (~164 KB/call). Verified
+;;; bit-identical to graph-grad across 5 shapes / 37,353 values.
+;;; NOTE the JIT is still ~5% SLOWER than the interpreter at 64x256->64 — the
+;;; gap narrowed (~1.12x -> ~1.06x slower), it did not flip. Fusing still only
+;;; pays at small shapes.
+;;;
 ;;; Loss = mean((relu(xW+b) - t)^2). The graph IR has no capture, so everything
 ;;; the loss needs is a param or a literal; the mean divisor is passed as `nn`.
 ;;; Inputs are integer-derived /8 — exactly representable, so Rusty and torch

@@ -489,8 +489,16 @@ pub fn compile_graph_grad(
             Op::Const(bits) => format!("f64::from_bits({}u64) /* {:?} */", bits, f64::from_bits(*bits)),
             Op::Param(p) => match &in_shapes[*p] {
                 None => format!("unsafe {{ *inp.add({}) }}", in_off[*p]),
+                // Borrow the caller's buffer instead of copying it in: every op
+                // below only reads its arguments (`.iter()`, indexing, slicing,
+                // `.as_ptr()`), so an owned Vec buys nothing and cost a full
+                // copy of every input tensor on every call. `inp` outlives the
+                // call, so the slice is valid for the whole body. The two sites
+                // that need an owned value (`If` arms, `SumTo` identity) say so
+                // themselves with `.to_vec()`, which works on slice and Vec
+                // alike — that is what keeps the generated types uniform.
                 Some(sh) => format!(
-                    "unsafe {{ std::slice::from_raw_parts(inp.add({}), {}) }}.to_vec()",
+                    "unsafe {{ std::slice::from_raw_parts(inp.add({}), {}) }}",
                     in_off[*p], sh.iter().product::<usize>()),
             },
             Op::Add => format!("v{} + v{}", a, b),
@@ -505,7 +513,10 @@ pub fn compile_graph_grad(
             Op::If  => {
                 let (t, e) = (node.args[1], node.args[2]);
                 if shapes[t].is_some() {
-                    format!("if v{} != 0.0 {{ v{}.clone() }} else {{ v{}.clone() }}", a, t, e)
+                    // to_vec, not clone: an arm may be a borrowed param slice
+                    // while the other is an owned Vec, and both arms of an `if`
+                    // must have the same type.
+                    format!("if v{} != 0.0 {{ v{}.to_vec() }} else {{ v{}.to_vec() }}", a, t, e)
                 } else {
                     format!("if v{} != 0.0 {{ v{} }} else {{ v{} }}", a, t, e)
                 }
@@ -565,7 +576,11 @@ pub fn compile_graph_grad(
             Op::SumTo => match (sa.unwrap(), sb.unwrap()) {
                 (Some(_), None) => format!("v{}.iter().sum::<f64>()", a),
                 (None, None)    => format!("v{}", a),
-                _               => format!("v{}.clone()", a), // same-shape identity
+                // Same-shape identity — borrow it. This arm fires once per
+                // gradient accumulation, so cloning here copied the whole
+                // tensor several times per call to produce a value nothing
+                // mutates. Consumers all auto-deref through the reference.
+                _               => format!("&v{}", a),
             },
             Op::Expand => match sb.unwrap() {
                 None => format!("v{}", a),
@@ -637,6 +652,9 @@ pub fn call_native_grad(
                 other)),
         }
     }
+    // (Skipping this zero-fill via with_capacity+set_len was measured at ~1% —
+    // inside the noise — and would make soundness here depend on the codegen
+    // covering every output slot. Not worth the coupling.)
     let mut out = vec![0.0_f64; out_shapes.iter().map(ssize).sum()];
     let f: unsafe extern "C" fn(*const f64, *mut f64) = unsafe { std::mem::transmute(fn_ptr) };
     unsafe { f(inp.as_ptr(), out.as_mut_ptr()) };
