@@ -355,10 +355,27 @@ fn build_and_load(source: &str, wants: &[(String, String, usize)]) -> Result<Vec
 /// Symbol resolution is the caller's job — ABIs differ per compilation path.
 const RUSTC_FLAGS: [&str; 6] = ["--edition", "2021", "-C", "opt-level=3", "--crate-type", "cdylib"];
 
+/// AVX2 is enabled only when the *running* CPU has it (the cache is
+/// per-machine, but a copied ~/.rusty must not SIGILL a smaller box), and as
+/// explicit target features rather than `target-cpu=native` so the flag —
+/// and therefore the cache hash — says exactly what the .so contains.
+/// Bit-exactness survives: Rust never contracts mul+add into FMA and never
+/// reassociates float reductions, so wider vectors change speed, not values.
+fn rustc_flags() -> Vec<&'static str> {
+    let mut flags = RUSTC_FLAGS.to_vec();
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        flags.push("-C");
+        flags.push("target-feature=+avx,+avx2");
+    }
+    flags
+}
+
 fn build_lib(source: &str, base: &str) -> Result<Rc<libloading::Library>, String> {
+    let flags = rustc_flags();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
-    RUSTC_FLAGS.hash(&mut hasher); // changed flags must invalidate cached .so's
+    flags.hash(&mut hasher); // changed flags must invalidate cached .so's
     let hash = hasher.finish();
 
     let so_ext = if cfg!(target_os = "macos") { "dylib" } else if cfg!(target_os = "windows") { "dll" } else { "so" };
@@ -370,7 +387,7 @@ fn build_lib(source: &str, base: &str) -> Result<Rc<libloading::Library>, String
         std::fs::write(&src_path, source)
             .map_err(|e| format!("defrust: cannot write {}: {}", src_path.display(), e))?;
         let output = std::process::Command::new("rustc")
-            .args(RUSTC_FLAGS)
+            .args(&flags)
             .arg("-o")
             .arg(&so_path)
             .arg(&src_path)

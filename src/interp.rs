@@ -939,18 +939,7 @@ pub fn setup_builtins(env: &Env) {
                 let (m, k) = (ash[0], ash[1]);
                 let (k2, n) = (bsh[0], bsh[1]);
                 if k != k2 { return Err(format!("matmul: inner dimensions differ ({}x{} · {}x{})", m, k, k2, n)); }
-                let mut out = vec![0.0; m * n];
-                for i in 0..m {
-                    let a_row = &a[i * k..(i + 1) * k];
-                    let o_row = &mut out[i * n..(i + 1) * n];
-                    for p in 0..k {
-                        let aip = a_row[p];
-                        let b_row = &b[p * n..(p + 1) * n];
-                        for j in 0..n {
-                            o_row[j] += aip * b_row[j];
-                        }
-                    }
-                }
+                let out = crate::graph_ir::matmul_ikj(a, b, m, k, n);
                 Ok(Value::Tensor { data: std::rc::Rc::new(out), shape: vec![m, n] })
             }
             _ => Err("matmul: both arguments must be tensors".into()),

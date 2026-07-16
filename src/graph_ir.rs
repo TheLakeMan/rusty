@@ -466,6 +466,46 @@ fn t_binop(a: &GVal, b: &GVal, name: &str, f: fn(f64, f64) -> f64) -> Result<GVa
     }
 }
 
+/// The one ikj matmul kernel body, shared by `t_matmul` and the `matmul`
+/// builtin (interp.rs). Per-element accumulation order (p ascending into
+/// each o[i][j]) is the order the bit-for-bit PyTorch claim depends on —
+/// both compiled versions below run this exact body, and neither FMA
+/// contraction nor reduction reassociation exists in Rust codegen, so the
+/// AVX2 version differs in speed only, never in bits.
+#[inline(always)]
+fn matmul_ikj_body(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize, data: &mut [f64]) {
+    for i in 0..n {
+        let x_row = &xd[i * k..(i + 1) * k];
+        let o_row = &mut data[i * m..(i + 1) * m];
+        for p in 0..k {
+            let x = x_row[p];
+            let y_row = &yd[p * m..(p + 1) * m];
+            for j in 0..m {
+                o_row[j] += x * y_row[j];
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn matmul_ikj_avx2(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize, data: &mut [f64]) {
+    matmul_ikj_body(xd, yd, n, k, m, data)
+}
+
+/// Dispatch once per call: the binary stays baseline x86-64, AVX2 is taken
+/// when the running CPU has it (std caches the detection).
+pub fn matmul_ikj(xd: &[f64], yd: &[f64], n: usize, k: usize, m: usize) -> Vec<f64> {
+    let mut data = vec![0.0; n * m];
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        unsafe { matmul_ikj_avx2(xd, yd, n, k, m, &mut data) };
+        return data;
+    }
+    matmul_ikj_body(xd, yd, n, k, m, &mut data);
+    data
+}
+
 fn t_matmul(a: &GVal, b: &GVal) -> Result<GVal, String> {
     match (a, b) {
         (GVal::Tensor { data: xd, shape: xs }, GVal::Tensor { data: yd, shape: ys }) => {
@@ -477,18 +517,7 @@ fn t_matmul(a: &GVal, b: &GVal) -> Result<GVal, String> {
             if k != k2 {
                 return Err(format!("graph-eval: matmul: inner dimensions differ ({} vs {})", k, k2));
             }
-            let mut data = vec![0.0; n * m];
-            for i in 0..n {
-                let x_row = &xd[i * k..(i + 1) * k];
-                let o_row = &mut data[i * m..(i + 1) * m];
-                for p in 0..k {
-                    let x = x_row[p];
-                    let y_row = &yd[p * m..(p + 1) * m];
-                    for j in 0..m {
-                        o_row[j] += x * y_row[j];
-                    }
-                }
-            }
+            let data = matmul_ikj(xd, yd, n, k, m);
             Ok(GVal::Tensor { data: Rc::new(data), shape: vec![n, m] })
         }
         _ => Err("graph-eval: matmul: both arguments must be tensors".into()),

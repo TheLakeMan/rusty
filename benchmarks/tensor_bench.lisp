@@ -32,6 +32,24 @@
 ;;; graph-grad (interpreted) is untouched by both — the medium interpreted row
 ;;; is noisy (~117-134 ms run to run), so compare JIT numbers, which are stable.
 ;;;
+;;; v0.50.0 — AVX2 without touching a single accumulation: the JIT rustc gets
+;;;   -C target-feature=+avx,+avx2 when the running CPU has AVX2 (folded into
+;;;   the cache hash; never target-cpu=native, so the flag says exactly what
+;;;   the .so contains), and the interpreter's two matmuls share one
+;;;   runtime-dispatched kernel (graph_ir::matmul_ikj, #[target_feature] AVX2
+;;;   version of the same body). Rust never FMA-contracts or reassociates, so
+;;;   wider vectors change speed only — proven by both final-loss values below
+;;;   landing bit-identical to v0.44, through 100/1000 SGD steps on both paths.
+;;;     64x256->64 x100   JIT ~110.8 ms -> ~98.7 ms  (-10.9%, medians of 3 runs)
+;;;     8x16->8   x1000   JIT  ~5.69 ms -> ~5.47 ms  (-3.9%)
+;;;   Cumulative JIT medium: 143.3 -> ~98.7 ms (-31%).
+;;;   MEASURED CEILING NOTE (Intel N95): Gracemont E-cores double-pump 256-bit
+;;;   ops, so AVX2 alone is worth only 1.07-1.24x on the matmul kernel here;
+;;;   the rest of PyTorch's remaining lead is FMA, which fuses rounding and is
+;;;   BANNED by the bit-for-bit claim. Blocked/tiled matmul at these shapes
+;;;   was REFUTED as a ~2x lane on this machine (kernel already at ~67% of
+;;;   non-FMA peak). Next bit-preserving lever: threading rows.
+;;;
 ;;; Loss = mean((relu(xW+b) - t)^2). The graph IR has no capture, so everything
 ;;; the loss needs is a param or a literal; the mean divisor is passed as `nn`.
 ;;; Inputs are integer-derived /8 — exactly representable, so Rusty and torch
