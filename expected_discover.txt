@@ -15,7 +15,7 @@ take  [function]  lists
   (take n lst)
 +  [builtin]  arithmetic
 -- help categories --
-Rusty — 343 commands. (help 'category) drills in; (apropos "x") searches; (describe 'name).
+Rusty — 367 commands. (help 'category) drills in; (apropos "x") searches; (describe 'name).
   agents (9)
   arithmetic (28)
   checkers (12)
@@ -34,6 +34,7 @@ Rusty — 343 commands. (help 'category) drills in; (apropos "x") searches; (des
   memory (6)
   meta (11)
   other (16)
+  pkg (24)
   records (4)
   serialization (2)
   special-form (40)

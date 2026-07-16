@@ -184,3 +184,11 @@
              (if (pkg-locked? name) (file-delete (pkg-lock-path name)))
              (list 'removed name))
       (list 'not-installed name)))
+
+;; Give the package manager its own help category (embedded + auto-loaded into
+;; every env, so these appear in (help)/(apropos)/(command-registry) unprefixed).
+;; Without this the 24 pkg-* names all fall into "other".
+(categorize! 'pkg '(pkg-root pkg-dir pkg-manifest-path pkg-installed? pkg-read-manifest
+  pkg-get pkg-strip-git pkg-url-name pkg-install pkg-load require-package pkg-list
+  pkg-dir? pkg-files pkg-fingerprint pkg-fp-lookup pkg-fp-diff pkg-verify
+  pkg-lock-root pkg-lock-path pkg-locked? pkg-lock! pkg-drift pkg-remove))

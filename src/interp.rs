@@ -53,6 +53,29 @@ pub fn load_stdlib(env: &Env, eval: &Evaluator) {
 
 pub const STDLIB: &str = include_str!("../std.lisp");
 
+// ── Package manager loader ────────────────────────────────────────────────
+// pkg.lisp (the registry-less package manager) is embedded and auto-loaded so
+// that `pkg-install`/`pkg-verify`/`pkg-drift` work in a stock `rusty` with no
+// `(load "pkg.lisp")` first — the "one install" story the apps' package
+// manifests rely on. Same disk-first-then-embedded shape as load_stdlib, and it
+// runs AFTER it because pkg.lisp uses std.lisp helpers (foldl/assoc/when/...).
+// Loading only defines functions — pkg.lisp has no top-level side effects.
+pub fn load_pkg(env: &Env, eval: &Evaluator) {
+    for path in &["pkg.lisp", "/usr/local/share/rusty/pkg.lisp"] {
+        if let Ok(code) = std::fs::read_to_string(path) {
+            if let Err(e) = run_code(&code, env, eval) {
+                eprintln!("Warning: pkg error in {}: {}", path, e);
+            }
+            return;
+        }
+    }
+    if let Err(e) = run_code(PKGLIB, env, eval) {
+        eprintln!("Warning: embedded pkg error: {}", e);
+    }
+}
+
+pub const PKGLIB: &str = include_str!("../pkg.lisp");
+
 // ── Fresh environment factory ─────────────────────────────────────────────
 
 pub fn make_env() -> Env {
@@ -60,6 +83,7 @@ pub fn make_env() -> Env {
     let eval = Evaluator::new();
     setup_builtins(&env);
     load_stdlib(&env, &eval);
+    load_pkg(&env, &eval);
     // Auto-load memory if it exists
     let mem = memory_path();
     if mem.exists() {

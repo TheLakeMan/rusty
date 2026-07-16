@@ -74,6 +74,12 @@
 (print (list 'no-lock-is-not-verified (pkg-drift "rusty-pkg-dep")))
 (print (list 'not-installed-is-not-verified (pkg-drift "no-such-package")))
 
+;; pkg-list enumerates the REAL ~/.rusty/packages, so its full contents aren't
+;; deterministic (the owner may have other packages installed). Test membership
+;; instead: both fixtures we installed must appear, as (name version) rows.
+(define (listed? name) (not (null? (filter (lambda (p) (equal? (car p) name)) (pkg-list)))))
+(print (list 'list-includes-fixtures (and (listed? "rusty-pkg-dep") (listed? "rusty-pkg-fix"))))
+
 ;; ── Uninstall, leave the machine clean ───────────────────────────────────
 (print (pkg-remove "rusty-pkg-fix"))
 (print (list 'lock-removed-with-package (pkg-locked? "rusty-pkg-fix")))

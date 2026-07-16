@@ -16,6 +16,7 @@
 (missing-file-named (changed ((dep.lisp missing))))
 (no-lock-is-not-verified (no-lock rusty-pkg-dep))
 (not-installed-is-not-verified (not-installed no-such-package))
+(list-includes-fixtures #t)
 (removed rusty-pkg-fix)
 (lock-removed-with-package #f)
 (removed rusty-pkg-dep)
