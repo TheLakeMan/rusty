@@ -470,7 +470,11 @@ impl Evaluator {
                                 let code = std::fs::read_to_string(&path_str)
                                     .map_err(|e| format!("load: cannot read '{}': {}", path_str, e))?;
                                 let tokens = crate::lexer::Lexer::new(&code).tokenize();
-                                let ast    = crate::parser::Parser::new(tokens).parse();
+                                // A half-written file is a load error, not a
+                                // silently shorter program.
+                                let ast    = crate::parser::Parser::new(tokens)
+                                    .parse_checked()
+                                    .map_err(|e| format!("load: {}: {}", path_str, e))?;
                                 // Loaded files evaluate at TOP LEVEL (the
                                 // global env), like Scheme's load — so a
                                 // load inside a function (e.g. pkg-load)

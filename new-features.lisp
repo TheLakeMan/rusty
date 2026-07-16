@@ -170,3 +170,27 @@
 (file-delete "/tmp/rusty-hash-empty.txt")
 (file-delete "/tmp/rusty-hash-copy.txt")
 (println (nil? (file-hash "/tmp/rusty-hash-abc.txt")))  ; deleted: nil again
+
+;; ── truncated source is an error, not a shorter program (v0.47.0) ────────
+;; The parser used to close an unclosed '(' at EOF and stop dead at a stray
+;; ')' — so a half-written file (partial clone, interrupted write) LOADED
+;; CLEAN with its tail swallowed into the last open form, or dropped. That is
+;; the worst kind of wrong: silent. Both are now load errors.
+(println "-- truncated source --")
+(file-write "/tmp/rusty-trunc.lisp" "(define (whole) 1)\n(define (half) 2")
+(println (try-catch (load "/tmp/rusty-trunc.lisp") (e) 'load-refused))
+(println (try-catch (whole) (e) 'never-defined))   ; the file did not take effect
+(file-write "/tmp/rusty-stray.lisp" "(define (a) 1)\n)\n(define (b) 2)")
+(println (try-catch (load "/tmp/rusty-stray.lisp") (e) 'load-refused))
+(println (try-catch (b) (e) 'never-defined))       ; nothing after ')' ran
+;; ...and a balanced file still loads, so the check isn't just refusing everything
+(file-write "/tmp/rusty-ok.lisp" "(define (fine) 7)")
+(load "/tmp/rusty-ok.lisp")
+(println (fine))
+(file-delete "/tmp/rusty-trunc.lisp")
+(file-delete "/tmp/rusty-stray.lisp")
+(file-delete "/tmp/rusty-ok.lisp")
+;; NB (whole) above was never-defined even though its definition was complete
+;; and came FIRST: parsing happens before evaluation, so a load is all-or-
+;; nothing. A truncated file can't half-apply.
+(println (nil? (file-hash "/tmp/rusty-trunc.lisp")))

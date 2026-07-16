@@ -23,10 +23,12 @@ pub fn elist(items: Vec<Expr>) -> Expr {
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// First structural complaint found, if any. See `parse_checked`.
+    err: Option<String>,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self { Parser { tokens, pos: 0 } }
+    pub fn new(tokens: Vec<Token>) -> Self { Parser { tokens, pos: 0, err: None } }
 
     fn peek(&self) -> &Token { self.tokens.get(self.pos).unwrap_or(&Token::EOF) }
 
@@ -44,9 +46,35 @@ impl Parser {
         ast
     }
 
+    /// `parse`, but structural damage is an error instead of a shrug.
+    ///
+    /// The lenient version silently *completes* an unclosed list at EOF and
+    /// silently *stops* at a stray top-level ')' — so a truncated file (a
+    /// partial clone, an interrupted write, a bad merge) loads as though it
+    /// were whole, with the tail quietly swallowed into the last open form or
+    /// dropped on the floor. Every caller that runs code wants to know instead.
+    /// `parse` itself stays lenient: the REPL decides completeness with its own
+    /// scanner before it ever gets here, and the LSP reports its own positions.
+    pub fn parse_checked(&mut self) -> Result<Vec<Expr>, String> {
+        let ast = self.parse();
+        match self.err.take() {
+            Some(e) => Err(e),
+            None => Ok(ast),
+        }
+    }
+
     fn parse_expr(&mut self) -> Option<Expr> {
         match self.peek().clone() {
-            Token::EOF | Token::RParen => { self.advance(); None }
+            Token::EOF => { self.advance(); None }
+            // A ')' with nothing open. parse() stops here, which would discard
+            // everything after it — never silently.
+            Token::RParen => {
+                if self.err.is_none() {
+                    self.err = Some("unexpected ')' with no matching '('".to_string());
+                }
+                self.advance();
+                None
+            }
 
             Token::Quote => {
                 self.advance();
@@ -73,7 +101,16 @@ impl Parser {
                 let mut list = Vec::new();
                 loop {
                     match self.peek() {
-                        Token::RParen | Token::EOF => { self.advance(); break; }
+                        Token::RParen => { self.advance(); break; }
+                        // Input ran out with this list still open. Don't advance
+                        // past EOF — parse()'s loop needs to see it and stop.
+                        Token::EOF => {
+                            if self.err.is_none() {
+                                self.err = Some(
+                                    "unexpected end of input: a '(' is never closed".to_string());
+                            }
+                            break;
+                        }
                         _ => { if let Some(e) = self.parse_expr() { list.push(e); } }
                     }
                 }

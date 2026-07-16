@@ -67,7 +67,12 @@ impl RustyInterp {
     /// Returns True if the code is syntactically valid.
     fn check(&self, code: &str) -> bool {
         let tokens = lexer::Lexer::new(code).tokenize();
-        !parser::Parser::new(tokens).parse().is_empty()
+        // It says "syntactically valid", so it has to mean it: unbalanced
+        // parens used to pass here.
+        match parser::Parser::new(tokens).parse_checked() {
+            Ok(ast) => !ast.is_empty(),
+            Err(_) => false,
+        }
     }
 
     fn __repr__(&self) -> &str { "<Rusty interpreter>" }

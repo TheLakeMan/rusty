@@ -28,7 +28,10 @@ pub fn category_of(name: &str) -> Option<String> {
 
 pub fn run_code(input: &str, env: &Env, eval: &Evaluator) -> Result<Value, String> {
     let tokens = Lexer::new(input).tokenize();
-    let ast    = Parser::new(tokens).parse();
+    // parse_checked, not parse: a truncated file must not run as if it were
+    // whole (see parser::parse_checked). The REPL has already decided the input
+    // is complete before it calls here.
+    let ast    = Parser::new(tokens).parse_checked()?;
     eval.eval_all(&ast, env)
 }
 
