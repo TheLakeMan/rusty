@@ -79,7 +79,7 @@ pub const PKGLIB: &str = include_str!("../pkg.lisp");
 // ── Fresh environment factory ─────────────────────────────────────────────
 
 pub fn make_env() -> Env {
-    let env  = EnvFrame::new(None);
+    let env  = EnvFrame::new_root();
     let eval = Evaluator::new();
     setup_builtins(&env);
     load_stdlib(&env, &eval);

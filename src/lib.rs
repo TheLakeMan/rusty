@@ -19,6 +19,7 @@ use pyo3::wrap_pyfunction;
 
 mod lexer;
 mod parser;
+mod resolve;
 mod env;
 mod eval;
 mod interp;

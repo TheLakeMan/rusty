@@ -261,6 +261,13 @@ pub type Env = Rc<RefCell<EnvFrame>>;
 pub enum Slots {
     Small(Vec<(String, Value)>),
     Map(VarMap),
+    // Root frame storage (lexical addressing): name → index into an
+    // append-only value table. Indices are stable for the life of the env
+    // (rebinding overwrites vals[idx]; names are never removed), which is
+    // what lets a GlobalRef cache its index. Iteration goes through the
+    // name map so cold paths (checkpoint, command-registry) see the same
+    // FxHashMap order they always did.
+    Root { map: rustc_hash::FxHashMap<String, u32>, vals: Vec<Value> },
 }
 
 /// Promotion threshold: params/let bindings rarely exceed this; a body
@@ -271,6 +278,13 @@ const SMALL_MAX: usize = 8;
 pub struct EnvFrame {
     slots: Slots,
     pub parent: Option<Env>,
+    // Set when a runtime `define` (or defmacro/deftool/defrust) injects a
+    // NEW name into this frame after construction — i.e. the frame's name
+    // set no longer matches what the resolver could see statically. Ref
+    // lookups check this on every intermediate frame and fall back to the
+    // full name walk, which is what makes lexical addressing sound under
+    // `eval`-in-current-env, macro-expanded defines, and internal defines.
+    dirty: bool,
 }
 
 // Frame storage is pooled (Phase 3.3 memory pooling — see src/arena.rs):
@@ -291,13 +305,26 @@ impl Drop for EnvFrame {
                 m.clear();
                 crate::arena::recycle_map(m);
             }
+            // One per env, never pooled — drop normally.
+            Slots::Root { .. } => {}
         }
     }
 }
 
 impl EnvFrame {
     pub fn new(parent: Option<Env>) -> Env {
-        Rc::new(RefCell::new(EnvFrame { slots: Slots::Small(crate::arena::take_small()), parent }))
+        Rc::new(RefCell::new(EnvFrame { slots: Slots::Small(crate::arena::take_small()), parent, dirty: false }))
+    }
+
+    /// Root-frame constructor (lexical addressing): stable-index storage so
+    /// GlobalRefs can cache a slot. Every environment root (make_env) goes
+    /// through here; child frames never do.
+    pub fn new_root() -> Env {
+        Rc::new(RefCell::new(EnvFrame {
+            slots: Slots::Root { map: rustc_hash::FxHashMap::default(), vals: Vec::new() },
+            parent: None,
+            dirty: false,
+        }))
     }
 
     /// Local-frame lookup+clone (no parent walk).
@@ -306,6 +333,7 @@ impl EnvFrame {
         match &self.slots {
             Slots::Small(v) => v.iter().find(|(k, _)| k == name).map(|(_, val)| val.clone()),
             Slots::Map(m) => m.get(name).cloned(),
+            Slots::Root { map, vals } => map.get(name).map(|i| vals[*i as usize].clone()),
         }
     }
 
@@ -314,6 +342,7 @@ impl EnvFrame {
         match &self.slots {
             Slots::Small(v) => v.iter().any(|(k, _)| k == name),
             Slots::Map(m) => m.contains_key(name),
+            Slots::Root { map, .. } => map.contains_key(name),
         }
     }
 
@@ -337,6 +366,15 @@ impl EnvFrame {
                 if let Slots::Small(sv) = old { crate::arena::recycle_small(sv); }
             }
             Slots::Map(m) => { m.insert(name, value); }
+            Slots::Root { map, vals } => {
+                match map.get(&name) {
+                    Some(i) => vals[*i as usize] = value,
+                    None => {
+                        vals.push(value);
+                        map.insert(name, (vals.len() - 1) as u32);
+                    }
+                }
+            }
         }
     }
 
@@ -346,6 +384,10 @@ impl EnvFrame {
         match &self.slots {
             Slots::Small(v) => { for (k, val) in v { f(k, val); } }
             Slots::Map(m) => { for (k, val) in m { f(k, val); } }
+            // Iterate via the name map so hash-order-dependent cold paths
+            // (checkpoint, command-registry) see the same order as the old
+            // VarMap root.
+            Slots::Root { map, vals } => { for (k, i) in map { f(k, &vals[*i as usize]); } }
         }
     }
 
@@ -363,8 +405,83 @@ impl EnvFrame {
         frame.parent.as_ref().and_then(|p| EnvFrame::get(p, name))
     }
 
+    /// Slot-resolved local lookup (lexical addressing): hop `depth` parents,
+    /// read the slot directly. Returns None — caller falls back to the full
+    /// name walk — when any intermediate frame is dirty (a runtime define
+    /// may have shadowed the binding), the target frame promoted past Small,
+    /// or the slot's name doesn't verify (resolver model drift; the verify
+    /// makes that a slowdown, never a wrong answer).
+    pub fn get_slot(env: &Env, depth: u16, slot: u16, name: &str) -> Option<Value> {
+        let mut cur = env.clone();
+        for _ in 0..depth {
+            let next = {
+                let f = cur.borrow();
+                if f.dirty { return None; }
+                f.parent.clone()?
+            };
+            cur = next;
+        }
+        let f = cur.borrow();
+        match &f.slots {
+            Slots::Small(v) => {
+                let (k, val) = v.get(slot as usize)?;
+                if k == name { Some(val.clone()) } else { None }
+            }
+            _ => None,
+        }
+    }
+
+    /// Root-resolved global lookup (lexical addressing): walk to the root,
+    /// scanning by name only in dirty frames (a runtime define may have
+    /// created a closer binding). At a Root frame the index cache answers
+    /// without hashing; first hit fills it.
+    pub fn get_global(env: &Env, name: &str, idx: &std::cell::Cell<u32>) -> Option<Value> {
+        let mut cur = env.clone();
+        loop {
+            let next = {
+                let f = cur.borrow();
+                match &f.parent {
+                    Some(p) => {
+                        if f.dirty {
+                            if let Some(v) = f.get_here(name) { return Some(v); }
+                        }
+                        p.clone()
+                    }
+                    None => {
+                        return match &f.slots {
+                            Slots::Root { map, vals } => {
+                                let i = idx.get();
+                                if i != u32::MAX {
+                                    Some(vals[i as usize].clone())
+                                } else {
+                                    let i = *map.get(name)?;
+                                    idx.set(i);
+                                    Some(vals[i as usize].clone())
+                                }
+                            }
+                            _ => f.get_here(name),
+                        };
+                    }
+                }
+            };
+            cur = next;
+        }
+    }
+
     pub fn set(env: &Env, name: String, value: Value) {
         env.borrow_mut().insert_here(name, value);
+    }
+
+    /// Bind via a runtime `define` (or defmacro/deftool/defrust). Unlike
+    /// `set` (construction-time binding), inserting a NEW name into a
+    /// non-root frame marks it dirty so resolved refs stop trusting the
+    /// frame's static name set.
+    pub fn define(env: &Env, name: String, value: Value) {
+        let mut f = env.borrow_mut();
+        if f.parent.is_some() && !f.has_here(&name) {
+            f.dirty = true;
+        }
+        f.insert_here(name, value);
     }
 
     pub fn set_existing(env: &Env, name: &str, value: Value) -> bool {

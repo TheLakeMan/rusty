@@ -70,6 +70,9 @@ pub fn expr_to_source(e: &Expr) -> String {
             let parts: Vec<String> = items.iter().map(expr_to_source).collect();
             format!("({})", parts.join(" "))
         }
+        // Resolved refs serialize as the symbol they replaced, so a resolved
+        // lambda checkpoints to the same source as the unresolved one.
+        Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } => name.to_string(),
     }
 }
 

@@ -99,10 +99,21 @@ impl Interner {
 
 // ── Build: restricted Expr subset → Graph ────────────────────────────────
 
+/// Symbol-ish name of an expression: resolved refs (lexical addressing)
+/// degrade to the name the source wrote.
+fn sym_of(e: &Expr) -> Option<&str> {
+    match e {
+        Expr::Symbol(s) => Some(s.as_str()),
+        Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } => Some(&**name),
+        _ => None,
+    }
+}
+
 fn build_num(ib: &mut Interner, params: &[String], expr: &Expr) -> Result<usize, String> {
     match expr {
         Expr::Number(n) => Ok(ib.konst(*n)),
-        Expr::Symbol(s) => {
+        Expr::Symbol(_) | Expr::LocalRef { .. } | Expr::GlobalRef { .. } => {
+            let s = sym_of(expr).unwrap();
             if let Some(i) = params.iter().position(|p| p == s) {
                 Ok(ib.intern(Op::Param(i), vec![]))
             } else {
@@ -113,13 +124,13 @@ fn build_num(ib: &mut Interner, params: &[String], expr: &Expr) -> Result<usize,
             }
         }
         Expr::List(items) if !items.is_empty() => {
-            if let Expr::Symbol(head) = &items[0] {
-                match head.as_str() {
+            if let Some(head) = sym_of(&items[0]) {
+                match head {
                     "+" | "-" | "*" | "/" if items.len() >= 2 => {
                         let mut arg_ids = items[1..].iter()
                             .map(|e| build_num(ib, params, e))
                             .collect::<Result<Vec<_>, _>>()?;
-                        let op = match head.as_str() { "+" => Op::Add, "-" => Op::Sub, "*" => Op::Mul, "/" => Op::Div, _ => unreachable!() };
+                        let op = match head { "+" => Op::Add, "-" => Op::Sub, "*" => Op::Mul, "/" => Op::Div, _ => unreachable!() };
                         if head == "-" && arg_ids.len() == 1 {
                             let zero = ib.konst(0.0);
                             return Ok(ib.intern(Op::Sub, vec![zero, arg_ids[0]]));
@@ -139,7 +150,7 @@ fn build_num(ib: &mut Interner, params: &[String], expr: &Expr) -> Result<usize,
                     {
                         let a = build_num(ib, params, &items[1])?;
                         let b = build_num(ib, params, &items[2])?;
-                        let op = match head.as_str() {
+                        let op = match head {
                             "tensor-add" => Op::TAdd, "tensor-sub" => Op::TSub,
                             "tensor-mul" => Op::TMul, _ => Op::TDiv,
                         };
@@ -174,8 +185,8 @@ fn build_num(ib: &mut Interner, params: &[String], expr: &Expr) -> Result<usize,
 
 fn build_bool(ib: &mut Interner, params: &[String], expr: &Expr) -> Result<usize, String> {
     if let Expr::List(items) = expr {
-        if let Some(Expr::Symbol(head)) = items.first() {
-            let op = match head.as_str() {
+        if let Some(head) = items.first().and_then(sym_of) {
+            let op = match head {
                 "<" => Some(Op::Lt), ">" => Some(Op::Gt), "<=" => Some(Op::Le),
                 ">=" => Some(Op::Ge), "=" => Some(Op::Eq), _ => None,
             };

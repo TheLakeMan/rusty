@@ -84,16 +84,28 @@ impl Ctx {
 
 // ── Codegen: restricted Expr subset → Rust source ────────────────────────
 
+/// Symbol-ish name: resolved refs (lexical addressing) degrade to the
+/// name the source wrote.
+fn sym_of(e: &Expr) -> Option<&str> {
+    match e {
+        Expr::Symbol(s) => Some(s.as_str()),
+        Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } => Some(&**name),
+        _ => None,
+    }
+}
+
 fn codegen_num(expr: &Expr, ctx: &mut Ctx) -> Result<String, String> {
     match expr {
         Expr::Number(n) => Ok(format!("({:?}_f64)", n)),
-        Expr::Symbol(s) => ctx.lookup(s).ok_or_else(|| format!(
+        Expr::Symbol(_) | Expr::LocalRef { .. } | Expr::GlobalRef { .. } => {
+            let s = sym_of(expr).unwrap();
+            return ctx.lookup(s).ok_or_else(|| format!(
             "defrust: unsupported reference to '{}' — only params, let/let* locals, numbers, \
              arithmetic and the numeric builtins are available in a defrust body", s
-        )),
+        )); }
         Expr::List(items) if !items.is_empty() => {
-            if let Expr::Symbol(head) = &items[0] {
-                match head.as_str() {
+            if let Some(head) = sym_of(&items[0]) {
+                match head {
                     "+" | "-" | "*" | "/" if items.len() >= 2 => {
                         let parts = items[1..].iter()
                             .map(|e| codegen_num(e, ctx))
@@ -104,7 +116,7 @@ fn codegen_num(expr: &Expr, ctx: &mut Ctx) -> Result<String, String> {
                     "sqrt" | "abs" | "floor" | "ceiling" | "round"
                     | "sin" | "cos" | "tan" | "atan" | "exp" | "log" if items.len() == 2 => {
                         let a = codegen_num(&items[1], ctx)?;
-                        let m = match head.as_str() { "ceiling" => "ceil", "log" => "ln", h => h };
+                        let m = match head { "ceiling" => "ceil", "log" => "ln", h => h };
                         Ok(format!("{}.{}()", a, m))
                     }
                     "expt" if items.len() == 3 => {
@@ -256,12 +268,12 @@ fn codegen_cond(clauses: &[Expr], ctx: &mut Ctx) -> Result<String, String> {
 
 fn codegen_bool(expr: &Expr, ctx: &mut Ctx) -> Result<String, String> {
     if let Expr::List(items) = expr {
-        if let Some(Expr::Symbol(head)) = items.first() {
-            match head.as_str() {
+        if let Some(head) = items.first().and_then(sym_of) {
+            match head {
                 "<" | ">" | "<=" | ">=" | "=" if items.len() == 3 => {
                     let a = codegen_num(&items[1], ctx)?;
                     let b = codegen_num(&items[2], ctx)?;
-                    let op = if head == "=" { "==" } else { head.as_str() };
+                    let op = if head == "=" { "==" } else { head };
                     return Ok(format!("({} {} {})", a, op, b));
                 }
                 "and" if items.len() >= 2 => {
