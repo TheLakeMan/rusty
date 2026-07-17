@@ -187,9 +187,13 @@
         (list 'sup 'pair '(one-for-all 2)
               (list 'worker 'a (make-named-counter 'a))
               (list 'worker 'b (make-named-counter 'b)))))
-;; phased runs: the scheduler drains one agent's queue before the next, so
-;; proving b's STATE reset (not just an unprocessed queue) needs b's ticks
-;; handled BEFORE the crash — send, run, then crash, then probe.
+;; Phase boundaries make the proof exact: run-tree quiesces before the
+;; crash, so every pre-crash tick is HANDLED, and any count seen after the
+;; crash can only come from post-restart state. Without the boundary, a
+;; still-queued tick would be processed by the fresh handler and the
+;; post-crash count could not distinguish reset state from leftover queue
+;; — that ambiguity is itself pinned as a negative control further down
+;; ("mailboxes survive, state does not").
 (send! 'a 'tick) (send! 'a 'tick) (send! 'b 'tick)
 (send! 'a 'report) (send! 'b 'report)
 (display (run-tree)) (newline)
@@ -217,6 +221,29 @@
 (send! 'a 'report) (send! 'b 'report) (send! 'c 'report)
 (display (run-tree)) (newline)
 (display (list 'collector-saw *tree-collected*)) (newline)  ; (a 1)(b 0)(c 0)
+
+(display "── negative control: mailboxes survive a restart, state does not ──") (newline)
+;; The stated divergence from Erlang, PROVEN so it can't hide in a comment:
+;; b banks 2 ticks (handled — state 2), then 3 more ticks are queued but NOT
+;; run when a crashes. one-for-all resets b's state; b's queue survives the
+;; restart and the fresh handler processes it. Final report: (b 3) — exactly
+;; the 3 surviving QUEUED ticks, not 5 (state did not survive), not 0 (queue
+;; did). One number separates the two claims.
+(set! *tree-collected* '())
+(supervise-tree!
+  (list 'sup 'root '(one-for-one 1)
+        (list 'worker 'collector make-tree-collector)
+        (list 'sup 'pair '(one-for-all 2)
+              (list 'worker 'a (make-named-counter 'a))
+              (list 'worker 'b (make-named-counter 'b)))))
+(send! 'b 'tick) (send! 'b 'tick)
+(display (run-tree)) (newline)          ; b's state is now 2, queue empty
+(send! 'b 'tick) (send! 'b 'tick) (send! 'b 'tick)  ; queued, NOT run
+(send! 'a 'boom)
+(display (run-tree)) (newline)          ; crash resets state; queue survives
+(send! 'b 'report)
+(display (run-tree)) (newline)
+(display (list 'collector-saw *tree-collected*)) (newline)  ; (b 3)
 
 (display "── escalation: budget exhaustion fails the sup as a unit, parent decides ──") (newline)
 ;; pair's budget is 1: crash 1 → pair restarts w; crash 2 → pair exhausted

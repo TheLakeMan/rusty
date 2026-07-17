@@ -48,6 +48,11 @@ verified
 (quiescent 1)
 (quiescent 6)
 (collector-saw ((a 1) (b 0) (c 0)))
+── negative control: mailboxes survive a restart, state does not ──
+(quiescent 2)
+(quiescent 4)
+(quiescent 2)
+(collector-saw ((b 3)))
 ── escalation: budget exhaustion fails the sup as a unit, parent decides ──
 (quiescent 5)
 (sups ((root 1 failed) (pair 1 failed)) workers ((w failed)) receipts 16 dead-letters ((w after-death)))
