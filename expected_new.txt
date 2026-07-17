@@ -67,3 +67,12 @@ refused
 refused
 echoed ok-1
 refused
+(lx-before-define 10)
+(lx-after-define 2)
+(lx-global-untouched 10)
+(lx-eval-shadow 100)
+(lx-redefine 1 2)
+(lx-macro-flip lx-undefined-name)
+(lx-capture 7 lx-letstar 33 lx-named-let 10)
+(lx-grad 6 lx-effects ("file-read: touches the filesystem"))
+(lx-shadow-builtin 10)

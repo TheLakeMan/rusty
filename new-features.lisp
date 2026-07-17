@@ -213,3 +213,44 @@
 (println (try-catch (safe-call sc-echo "ok-1") (e) 'refused))   ; global changed: now refused
 (println (safe-call-with-spec PINNED sc-echo "ok-1"))           ; pinned spec: still enforced
 (println (try-catch (safe-call-with-spec PINNED sc-echo "zz-1") (e) 'refused))
+
+; ── Lexical addressing (v0.56.0) — resolved refs must be invisible ──────
+; Slot-resolved variables (resolve.rs) rewrite lambda bodies created at
+; the global env; these cases pin the dynamic guards: a runtime define
+; into a live frame (dirty flag), eval-in-current-env injection,
+; function→macro flip (args degrade to symbols), and grad/check-effects
+; reading through resolved refs. Output must match the unresolved
+; interpreter exactly.
+(define lx-x 10)
+(define (lx-f1)
+  (begin
+    (display (list 'lx-before-define lx-x)) (newline)
+    (define lx-x 2)
+    (display (list 'lx-after-define lx-x)) (newline)))
+(lx-f1)
+(display (list 'lx-global-untouched lx-x)) (newline)
+(define (lx-f3 a)
+  (let ((b 1))
+    (begin (eval '(define a 99)) (+ a b))))
+(display (list 'lx-eval-shadow (lx-f3 5))) (newline)
+(define (lx-g) 1)
+(define (lx-caller) (lx-g))
+(define lx-first (lx-caller))
+(define (lx-g) 2)
+(display (list 'lx-redefine lx-first (lx-caller))) (newline)
+(define (lx-h a) a)
+(define (lx-uses-h) (lx-h lx-undefined-name))
+(defmacro lx-h (a) `(quote ,a))
+(display (list 'lx-macro-flip (lx-uses-h))) (newline)
+(define (lx-adder n) (lambda (v) (+ v n)))
+(define (lx-f7 p) (let* ((p (+ p 1)) (q (* p 2))) (+ p q)))
+(define (lx-f9)
+  (let loop ((i 0) (acc 0)) (if (= i 5) acc (loop (+ i 1) (+ acc i)))))
+(display (list 'lx-capture ((lx-adder 3) 4)
+               'lx-letstar (lx-f7 10)
+               'lx-named-let (lx-f9))) (newline)
+(define lx-df (grad (lambda (t) (* t t))))
+(display (list 'lx-grad (lx-df 3)
+               'lx-effects (check-effects (lambda (p) (file-read p))))) (newline)
+(define (lx-f14 max) (+ max 1))
+(display (list 'lx-shadow-builtin (lx-f14 9))) (newline)
