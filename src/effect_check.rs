@@ -42,8 +42,15 @@ pub fn effect_reason(op: &str) -> Option<&'static str> {
 pub fn check(expr: &Expr, findings: &mut Vec<String>) {
     if let Expr::List(items) = expr {
         if items.is_empty() { return; }
-        if let Expr::Symbol(head) = &items[0] {
-            match head.as_str() {
+        // Resolved refs (lexical addressing) carry the same name the source
+        // wrote — a rewritten head is still the operation it names.
+        let head = match &items[0] {
+            Expr::Symbol(s) => Some(s.as_str()),
+            Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } => Some(&**name),
+            _ => None,
+        };
+        if let Some(head) = head {
+            match head {
                 "quote" => return, // quoted data is never executed
                 "quasiquote" if items.len() == 2 => { check_quasi(&items[1], findings); return; }
                 _ => {

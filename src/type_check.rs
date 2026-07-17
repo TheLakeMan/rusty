@@ -92,15 +92,25 @@ fn narrow_predicate(op: &str) -> Option<Ty> {
 /// to that type in the then-branch env and to `Unknown` in the else-branch
 /// env (we don't model "not X", so the else side just gives up narrowing
 /// rather than asserting something unsound).
+/// Variable-ish name of an expression: a Symbol, or a resolved ref
+/// (lexical addressing), which carries the same name the source wrote.
+fn name_of(e: &Expr) -> Option<&str> {
+    match e {
+        Expr::Symbol(s) => Some(s.as_str()),
+        Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } => Some(&**name),
+        _ => None,
+    }
+}
+
 fn narrow_from_if(cond: &Expr, env: &TyEnv) -> (TyEnv, TyEnv) {
     if let Expr::List(items) = cond {
         if items.len() == 2 {
-            if let (Expr::Symbol(op), Expr::Symbol(var)) = (&items[0], &items[1]) {
+            if let (Some(op), Some(var)) = (name_of(&items[0]), name_of(&items[1])) {
                 if let Some(ty) = narrow_predicate(op) {
                     let mut then_env = env.clone();
-                    then_env.insert(var.clone(), ty);
+                    then_env.insert(var.to_string(), ty);
                     let mut else_env = env.clone();
-                    else_env.insert(var.clone(), Ty::Unknown);
+                    else_env.insert(var.to_string(), Ty::Unknown);
                     return (then_env, else_env);
                 }
             }
@@ -116,9 +126,11 @@ pub fn infer(expr: &Expr, env: &TyEnv, errors: &mut Vec<String>) -> Ty {
         Expr::Bool(_)   => Ty::Boolean,
         Expr::Nil       => Ty::Unknown,
         Expr::Symbol(s) => env.get(s).copied().unwrap_or(Ty::Unknown),
+        Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } =>
+            env.get(&**name).copied().unwrap_or(Ty::Unknown),
         Expr::List(items) if !items.is_empty() => {
-            if let Expr::Symbol(head) = &items[0] {
-                match head.as_str() {
+            if let Some(head) = name_of(&items[0]) {
+                match head {
                     "if" if items.len() >= 3 => {
                         infer(&items[1], env, errors); // condition may itself contain an error
                         let (then_env, else_env) = narrow_from_if(&items[1], env);

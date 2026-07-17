@@ -20,6 +20,7 @@
 
 mod lexer;
 mod parser;
+mod resolve;
 mod env;
 mod eval;
 mod interp;

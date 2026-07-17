@@ -202,6 +202,18 @@ impl Evaluator {
                 return EnvFrame::get(env, s)
                     .ok_or_else(|| undefined_error(env, s));
             }
+            // Lexical addressing (resolve.rs): slot hit or fall back to the
+            // name walk — the fallback is what keeps resolver drift and
+            // runtime defines correct (see env.rs get_slot/get_global).
+            Expr::LocalRef { depth, slot, name } => {
+                if let Some(v) = EnvFrame::get_slot(env, *depth, *slot, name) { return Ok(v); }
+                return EnvFrame::get(env, name)
+                    .ok_or_else(|| undefined_error(env, name));
+            }
+            Expr::GlobalRef { name, idx } => {
+                return EnvFrame::get_global(env, name, idx)
+                    .ok_or_else(|| undefined_error(env, name));
+            }
             _ => {}
         }
         let mut cur = expr.clone();
@@ -219,8 +231,26 @@ impl Evaluator {
                         .ok_or_else(|| undefined_error(&env, s));
                 }
 
+                Expr::LocalRef { depth, slot, name } => {
+                    if let Some(v) = EnvFrame::get_slot(&env, *depth, *slot, name) { return Ok(v); }
+                    return EnvFrame::get(&env, name)
+                        .ok_or_else(|| undefined_error(&env, name));
+                }
+                Expr::GlobalRef { name, idx } => {
+                    return EnvFrame::get_global(&env, name, idx)
+                        .ok_or_else(|| undefined_error(&env, name));
+                }
+
                 Expr::List(lst) => {
                     if lst.is_empty() { return Ok(Value::Nil); }
+
+                    // Coverage for resolved heads: a rewritten operator is
+                    // still the command the source named.
+                    if crate::trace::coverage_enabled() {
+                        if let Expr::GlobalRef { name, .. } | Expr::LocalRef { name, .. } = &lst[0] {
+                            crate::trace::cover(name);
+                        }
+                    }
 
                     if let Expr::Symbol(head) = &lst[0] {
                         // Coverage: this is the one place a call's operator name
@@ -279,7 +309,7 @@ impl Evaluator {
                                     _ => return Err("deftool: description must be a string".into()),
                                 };
                                 let body = std::rc::Rc::new(lst[4..].to_vec());
-                                EnvFrame::set(&env, name.clone(), Value::Tool {
+                                EnvFrame::define(&env, name.clone(), Value::Tool {
                                     name, description, params: std::rc::Rc::new(params), body, env: env.clone(),
                                 });
                                 return Ok(Value::Nil);
@@ -751,7 +781,7 @@ impl Evaluator {
                                 let name = sym_name(&lst[1], "set")?;
                                 let val  = self.eval(&lst[2], &env)?;
                                 if !EnvFrame::set_existing(&env, &name, val.clone()) {
-                                    EnvFrame::set(&env, name, val);
+                                    EnvFrame::define(&env, name, val);
                                 }
                                 return Ok(Value::Nil);
                             }
@@ -793,7 +823,7 @@ impl Evaluator {
                                 // to fresh gensyms, so they can't capture or be captured
                                 // by identifiers from the use site.
                                 let body = std::rc::Rc::new(retained.iter().map(hygienic_rename_top).collect::<Vec<_>>());
-                                EnvFrame::set(&env, name, Value::Macro { params: std::rc::Rc::new(params), rest, body, env: def_env });
+                                EnvFrame::define(&env, name, Value::Macro { params: std::rc::Rc::new(params), rest, body, env: def_env });
                                 return Ok(Value::Nil);
                             }
 
@@ -807,7 +837,7 @@ impl Evaluator {
                                     _ => return Err("defrust: params must be a list".into()),
                                 };
                                 let native = crate::rust_jit::compile_and_load(&name, &params, &lst[3])?;
-                                EnvFrame::set(&env, name, native);
+                                EnvFrame::define(&env, name, native);
                                 return Ok(Value::Nil);
                             }
 
@@ -834,7 +864,7 @@ impl Evaluator {
                                 }
                                 let natives = crate::rust_jit::compile_and_load_group(&defs)?;
                                 for (d, native) in defs.iter().zip(natives) {
-                                    EnvFrame::set(&env, d.name.clone(), native);
+                                    EnvFrame::define(&env, d.name.clone(), native);
                                 }
                                 return Ok(Value::Nil);
                             }
@@ -889,6 +919,24 @@ impl Evaluator {
 
                     // ── Function call ──
                     let func = self.eval(&lst[0], &env)?;
+
+                    // A resolved head (GlobalRef/LocalRef) bypasses the
+                    // Symbol-head macro block above; keep macro dispatch
+                    // dynamic for it — expansion must see UNevaluated args.
+                    if let Value::Macro { params, rest, body, env: mac_env } = &func {
+                        if let Expr::GlobalRef { name, .. } | Expr::LocalRef { name, .. } = &lst[0] {
+                            let arg_vals: Vec<Value> = lst[1..].iter().map(expr_to_value).collect();
+                            let mac_child = EnvFrame::extend(mac_env, params, rest, arg_vals)?;
+                            let last = body.len() - 1;
+                            let profile_start = macro_profile::start(name);
+                            for e in &body[..last] { self.eval(e, &mac_child)?; }
+                            let expanded = self.eval(&body[last], &mac_child)?;
+                            macro_profile::finish(name, profile_start);
+                            cur = value_to_expr(&expanded);
+                            continue;
+                        }
+                    }
+
                     let args: Result<Vec<Value>, _> = lst[1..].iter()
                         .map(|a| self.eval(a, &env)).collect();
                     let args = args?;
@@ -980,13 +1028,13 @@ impl Evaluator {
         match &list[1] {
             Expr::Symbol(name) => {
                 let val = self.eval(&list[2], env)?;
-                EnvFrame::set(env, name.clone(), val);
+                EnvFrame::define(env, name.clone(), val);
             }
             Expr::List(sig) => {
                 let name = sym_name(sig.first().ok_or("define: empty signature")?, "define")?;
                 let (params, rest) = parse_params(&sig[1..])?;
-                let body = std::rc::Rc::new(list[2..].to_vec());
-                EnvFrame::set(env, name, Value::Lambda { params: std::rc::Rc::new(params), rest, body, env: env.clone() });
+                let body = std::rc::Rc::new(resolved_body(&params, &rest, &list[2..], env));
+                EnvFrame::define(env, name, Value::Lambda { params: std::rc::Rc::new(params), rest, body, env: env.clone() });
             }
             _ => return Err("define: first arg must be symbol or list".into()),
         }
@@ -1001,8 +1049,8 @@ impl Evaluator {
             Expr::List(ps) => parse_params(ps)?,
             _ => return Err("def: params must be a list".into()),
         };
-        let body = std::rc::Rc::new(list[3..].to_vec());
-        EnvFrame::set(env, name, Value::Lambda { params: std::rc::Rc::new(params), rest, body, env: env.clone() });
+        let body = std::rc::Rc::new(resolved_body(&params, &rest, &list[3..], env));
+        EnvFrame::define(env, name, Value::Lambda { params: std::rc::Rc::new(params), rest, body, env: env.clone() });
         Ok(Value::Nil)
     }
 
@@ -1013,7 +1061,8 @@ impl Evaluator {
             Expr::Symbol(s) => (vec![], Some(s.clone())),
             _ => return Err("lambda: params must be a list or symbol".into()),
         };
-        Ok(Value::Lambda { params: std::rc::Rc::new(params), rest, body: std::rc::Rc::new(list[2..].to_vec()), env: env.clone() })
+        let body = std::rc::Rc::new(resolved_body(&params, &rest, &list[2..], env));
+        Ok(Value::Lambda { params: std::rc::Rc::new(params), rest, body, env: env.clone() })
     }
 
     // ── let forms ─────────────────────────────────────────────────────────
@@ -1161,6 +1210,9 @@ pub fn expr_to_value(e: &Expr) -> Value {
         Expr::Symbol(s) => Value::Symbol(s.clone()),
         Expr::List(vs)  => list(vs.iter().map(expr_to_value).collect()),
         Expr::Nil       => Value::Nil,
+        // Resolved refs degrade to the symbol they replaced — macro
+        // arguments and quoted-ish consumers can't tell resolution happened.
+        Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } => Value::Symbol(name.to_string()),
     }
 }
 
@@ -1178,7 +1230,21 @@ pub fn value_to_expr(v: &Value) -> Expr {
 fn sym_name(e: &Expr, ctx: &str) -> Result<String, String> {
     match e {
         Expr::Symbol(s) => Ok(s.clone()),
+        Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } => Ok(name.to_string()),
         _ => Err(format!("{}: expected a symbol", ctx)),
+    }
+}
+
+/// Lambda body for a closure being created in `env`: resolved to slot
+/// references when the creation env is a root (top-level define/lambda —
+/// the chain at every call is then exactly [modeled frames..., call frame,
+/// root], which is what makes the resolver's depth arithmetic sound).
+/// Anywhere else the body is used verbatim.
+fn resolved_body(params: &[String], rest: &Option<String>, body: &[Expr], env: &Env) -> Vec<Expr> {
+    if env.borrow().parent.is_none() {
+        crate::resolve::resolve_body(params, rest, body)
+    } else {
+        body.to_vec()
     }
 }
 
@@ -1256,9 +1322,14 @@ pub fn symbolic_derivative(expr: &Expr, var: &str) -> Result<Expr, String> {
         Expr::Number(_) => Ok(Expr::Number(0.0)),
         Expr::Symbol(s) if s == var => Ok(Expr::Number(1.0)),
         Expr::Symbol(_) => Ok(Expr::Number(0.0)),
+        // Resolved refs differentiate exactly as the symbol they replaced.
+        Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } if &**name == var => Ok(Expr::Number(1.0)),
+        Expr::LocalRef { .. } | Expr::GlobalRef { .. } => Ok(Expr::Number(0.0)),
         Expr::List(items) if !items.is_empty() => {
             let head = match &items[0] {
                 Expr::Symbol(s) => s.as_str(),
+                // Operator heads in a resolved body are refs to the same names.
+                Expr::LocalRef { name, .. } | Expr::GlobalRef { name, .. } => &**name,
                 _ => return Err("grad: unsupported expression (expected an operator)".into()),
             };
             let args = &items[1..];

@@ -11,6 +11,17 @@ pub enum Expr {
     Symbol(String),
     List(std::rc::Rc<Vec<Expr>>),
     Nil,
+    // Lexical addressing (resolve.rs): slot-resolved variable references,
+    // produced only by resolving a lambda body at closure creation — never
+    // by the parser. Every consumer except eval's lookup path must treat
+    // them exactly as Expr::Symbol(name) ("degrade to the name"), so a ref
+    // leaking into display/serialization/macro-land is indistinguishable
+    // from the symbol it replaced.
+    LocalRef { depth: u16, slot: u16, name: std::rc::Rc<str> },
+    // idx is a lazily-filled cache of the name's slot in the root frame's
+    // stable value table (u32::MAX = not yet resolved); sound because root
+    // slots are append-only and a closure's root never changes.
+    GlobalRef { name: std::rc::Rc<str>, idx: std::cell::Cell<u32> },
 }
 
 /// Build a list expression. `Expr::List` is `Rc`-backed (Phase 3.3 —
