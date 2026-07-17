@@ -1,0 +1,35 @@
+── certify-policy: budget honesty by exhaustion ──
+verified
+verified
+── crash → restart → budget exhaustion (one-for-one) ──
+(quiescent 7)
+(children ((worker 2 failed) (sibling 0 running)) receipts 3 dead-letters ((worker after-death)))
+(receipts ((crash worker boom "worker exploded" 0 restart) (crash worker boom "worker exploded" 1 restart) (crash worker boom "worker exploded" 2 give-up)))
+(sibling-saw (alive-1 alive-2))
+── restart resets state (fresh handler from init) ──
+(quiescent 6)
+(sibling-saw ((count 1)))
+── init crash on restart → receipt + give-up, run survives ──
+(quiescent 2)
+(children ((fragile 1 failed)) receipts 2 dead-letters ((fragile after)))
+(receipts ((crash fragile boom "fragile crashed" 0 restart) (init-crash fragile "init exploded" give-up)))
+── isolation honesty: refuse-by-default spawn from source ──
+(spawned honest)
+(refused ((set!-outside *mailboxes*)))
+(refused ((undeclared-call file-write)))
+(refused ((undeclared-call computed-call)))
+(quiescent 2)
+(my-count 2)
+── proven hot reload of a live supervised agent ──
+(quiescent 2)
+(before-evolve ((result 6)))
+(ok worker-math)
+(rejected adds-effects ("file-write: touches the filesystem"))
+(trojan-ran #f)
+(rejected not-equivalent-on-domain ((13) "false"))
+(quiescent 2)
+(after-evolve ((result 6) (result 8)))
+(quiescent 3)
+(after-crash ((result 6) (result 8) (result 10)))
+(children ((mathw 1 running) (collector 0 running)) receipts 1 dead-letters ())
+(kg-receipts (((?p evolve-verdict) (?o ok)) ((?p evolved-to) (?o (lambda (n) (* 2 n)))) ((?p evolve-domain-size) (?o 21)) ((?p evolve-verdict) (?o rejected)) ((?p evolve-rejected-because) (?o adds-effects)) ((?p evolve-rejected-because) (?o not-equivalent-on-domain))))
