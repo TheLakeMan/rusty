@@ -33,3 +33,26 @@ verified
 (after-crash ((result 6) (result 8) (result 10)))
 (children ((mathw 1 running) (collector 0 running)) receipts 1 dead-letters ())
 (kg-receipts (((?p evolve-verdict) (?o ok)) ((?p evolved-to) (?o (lambda (n) (* 2 n)))) ((?p evolve-domain-size) (?o 21)) ((?p evolve-verdict) (?o rejected)) ((?p evolve-rejected-because) (?o adds-effects)) ((?p evolve-rejected-because) (?o not-equivalent-on-domain))))
+── certify-strategy: restart-set semantics by exhaustion ──
+verified
+verified
+verified
+── one-for-all: a crash re-inits every sibling under that sup ──
+(quiescent 7)
+(quiescent 1)
+(quiescent 5)
+(collector-saw ((a 2) (b 1) (a 1) (b 0)))
+(sups ((root 0 running) (pair 1 running)) workers ((collector running) (a running) (b running)) receipts 3 dead-letters ())
+── rest-for-one: crash resets the crashed child and later siblings ──
+(quiescent 3)
+(quiescent 1)
+(quiescent 6)
+(collector-saw ((a 1) (b 0) (c 0)))
+── escalation: budget exhaustion fails the sup as a unit, parent decides ──
+(quiescent 5)
+(sups ((root 1 failed) (pair 1 failed)) workers ((w failed)) receipts 16 dead-letters ((w after-death)))
+(receipts ((crash w boom "counter crashed") (decision pair w 0 restart) (restart-set pair (w)) (crash w boom "counter crashed") (decision pair w 1 give-up) (escalate pair root) (decision root pair 0 restart) (restart-set root (pair)) (crash w boom "counter crashed") (decision pair w 0 restart) (restart-set pair (w)) (crash w boom "counter crashed") (decision pair w 1 give-up) (escalate pair root) (decision root pair 1 give-up) (tree-failed root)))
+── re-init crash during tree restart → escalates, never a dead run ──
+(quiescent 1)
+(sups ((root 1 failed) (pair 0 failed)) workers ((f failed)) receipts 9 dead-letters ())
+(receipts ((crash f boom "fragile crashed") (decision pair f 0 restart) (restart-set pair (f)) (init-crash pair "init exploded" escalate) (escalate pair root) (decision root pair 0 restart) (restart-set root (pair)) (init-crash root "init exploded" escalate) (tree-failed root)))

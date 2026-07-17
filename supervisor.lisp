@@ -239,3 +239,203 @@
     (if (equal? verdict 'isolated)
         (begin (agent-spawn name (eval source)) (list 'spawned name))
         verdict)))
+
+;; ── Supervision TREES (escalation + strategies) ─────────────────────────
+;; The Erlang-faithful layer, coexisting with the flat supervisor above
+;; (which the earlier goldens pin; per-child lifetime budget documented
+;; there). Trees differ deliberately:
+;;   - The budget is per-SUPERVISOR (restart intensity, Erlang-style —
+;;     lifetime count, not time-windowed, same determinism reasoning).
+;;   - Exceeding it fails the supervisor AS A UNIT: its whole subtree is
+;;     terminated and the failure ESCALATES to its parent, which decides
+;;     with its own policy; root exhaustion = tree-failed.
+;;   - Strategies are DATA: one-for-one / one-for-all / rest-for-one.
+;;     strategy-restart-set is pure, and certify-strategy pins its
+;;     semantics exhaustively (set membership per crash index).
+;;   - Mailboxes survive a restart (they belong to the scheduler);
+;;     handler STATE does not. Erlang drops the queue with the process —
+;;     keeping it is a divergence, stated here, receipted nowhere else.
+;; Spec shape: (sup name (strategy budget) child ...), child =
+;; (worker name init-thunk) | nested (sup ...). Workers spawn depth-first,
+;; so scheduler order remains the spec's textual order — deterministic.
+
+(define *tree-sups* '())     ; ((name policy restarts status parent) ...)
+(define *tree-workers* '())  ; ((name init status sup) ...)
+(define *tree-children* '()) ; ((sup ((worker w) | (sup s) ...)) ...) ordered
+(define *tree-receipts* '())
+(define *tree-dead* '())
+
+(define (tree-reset!)
+  (set! *tree-sups* '())
+  (set! *tree-workers* '())
+  (set! *tree-children* '())
+  (set! *tree-receipts* '())
+  (set! *tree-dead* '())
+  'ok)
+
+(define (tsup name) (assoc name *tree-sups*))
+(define (tsup-parent s) (cadr (cdr (cddr s))))
+(define (tsup-update! name restarts status)
+  (set! *tree-sups*
+        (map (lambda (s) (if (equal? (car s) name)
+                             (list (car s) (cadr s) restarts status (tsup-parent s))
+                             s))
+             *tree-sups*)))
+
+(define (tworker name) (assoc name *tree-workers*))
+(define (tworker-status! name status)
+  (set! *tree-workers*
+        (map (lambda (w) (if (equal? (car w) name)
+                             (list (car w) (cadr w) status (cadddr w))
+                             w))
+             *tree-workers*)))
+
+(define (tree-receipt! r)
+  (set! *tree-receipts* (append *tree-receipts* (list r))))
+
+;; Pure, certifiable: which children restart when `crashed` crashes.
+(define (strategy-restart-set strategy children crashed)
+  (cond ((equal? strategy 'one-for-one) (list crashed))
+        ((equal? strategy 'one-for-all) children)
+        ((equal? strategy 'rest-for-one)
+         (let drop ((cs children))
+           (cond ((null? cs) '())
+                 ((equal? (car cs) crashed) cs)
+                 (else (drop (cdr cs))))))
+        (else '())))
+
+;; Pins each strategy's semantics on every (n children, crash index i)
+;; pair in the domain: one-for-one = exactly the crashed child,
+;; one-for-all = all of them, rest-for-one = the crashed one and every
+;; child spawned after it.
+(define (certify-strategy strategy)
+  (check-exhaustive
+    (lambda (n i)
+      (if (>= i n)
+          #t
+          (let ((s (strategy-restart-set strategy (range 0 n) i)))
+            (cond ((equal? strategy 'one-for-one) (equal? s (list i)))
+                  ((equal? strategy 'one-for-all) (equal? s (range 0 n)))
+                  ((equal? strategy 'rest-for-one) (equal? s (range i n)))
+                  (else #f)))))
+    (list (range 1 6) (range 0 5))))
+
+(define (tree-build! spec parent)
+  (let ((sname (cadr spec))
+        (policy (caddr spec))
+        (kids (cdr (cddr spec))))
+    (set! *tree-sups*
+          (append *tree-sups* (list (list sname policy 0 'running parent))))
+    (set! *tree-children*
+          (append *tree-children*
+                  (list (list sname
+                              (map (lambda (k) (list (car k) (cadr k))) kids)))))
+    (map (lambda (k)
+           (if (equal? (car k) 'worker)
+               (begin
+                 (set! *tree-workers*
+                       (append *tree-workers*
+                               (list (list (cadr k) (caddr k) 'running sname))))
+                 (agent-spawn (cadr k) ((caddr k))))
+               (tree-build! k sname)))
+         kids)
+    sname))
+
+(define (supervise-tree! spec)
+  (agent-reset!)
+  (tree-reset!)
+  (tree-build! spec '())
+  'supervised-tree)
+
+;; Fresh handlers for one child entry; a (sup s) entry resets the whole
+;; subtree — counters, statuses, every descendant's state.
+(define (tree-reinit-child! entry)
+  (if (equal? (car entry) 'worker)
+      (begin
+        (tworker-status! (cadr entry) 'running)
+        (sup-agent-replace! (cadr entry) ((cadr (tworker (cadr entry))))))
+      (begin
+        (tsup-update! (cadr entry) 0 'running)
+        (map tree-reinit-child! (cadr (assoc (cadr entry) *tree-children*)))
+        'ok)))
+
+;; Terminate a supervisor as a unit: it and every descendant marked failed
+;; (their queued mail then drains to dead letters, one per step).
+(define (tree-fail-sup! sname)
+  (tsup-update! sname (caddr (tsup sname)) 'failed)
+  (map (lambda (e)
+         (if (equal? (car e) 'worker)
+             (tworker-status! (cadr e) 'failed)
+             (tree-fail-sup! (cadr e))))
+       (cadr (assoc sname *tree-children*)))
+  'failed)
+
+(define (tree-escalate! sname)
+  (tree-fail-sup! sname)
+  (let ((parent (tsup-parent (tsup sname))))
+    (if (null? parent)
+        (begin (tree-receipt! (list 'tree-failed sname))
+               'tree-failed)
+        (begin (tree-receipt! (list 'escalate sname parent))
+               (tree-decide-and-act! parent (list 'sup sname))))))
+
+;; One decision at supervisor `sname` about crashed child entry
+;; (worker w) | (sup s): same certified supervisor-decide core (policy is
+;; (strategy budget); decide reads the budget), then the certified
+;; strategy set. A re-init that itself crashes escalates — never a dead
+;; supervisor, exactly like the flat version's init-crash receipt.
+(define (tree-decide-and-act! sname crashed-entry)
+  (let* ((s (tsup sname))
+         (policy (cadr s))
+         (restarts (caddr s))
+         (decision (supervisor-decide policy restarts)))
+    (tree-receipt! (list 'decision sname (cadr crashed-entry) restarts decision))
+    (if (equal? decision 'restart)
+        (let ((rset (strategy-restart-set (car policy)
+                                          (cadr (assoc sname *tree-children*))
+                                          crashed-entry)))
+          (tsup-update! sname (+ restarts 1) 'running)
+          (tree-receipt! (list 'restart-set sname (map cadr rset)))
+          (try-catch
+            (begin (map tree-reinit-child! rset) 'restarted)
+            (e2)
+            (begin (tree-receipt! (list 'init-crash sname e2 'escalate))
+                   (tree-escalate! sname))))
+        (tree-escalate! sname))))
+
+(define (tree-step)
+  (let scan ((as *agents*))
+    (if (null? as)
+        #f
+        (let* ((name (car (car as)))
+               (q (cadr (assoc name *mailboxes*))))
+          (cond ((null? q) (scan (cdr as)))
+                ((not (equal? (caddr (tworker name)) 'running))
+                 (begin
+                   (mailbox-set! name (cdr q))
+                   (set! *tree-dead* (append *tree-dead* (list (list name (car q)))))
+                   #t))
+                (else
+                  (let ((handler (cadr (assoc name *agents*))))
+                    (mailbox-set! name (cdr q))
+                    (try-catch
+                      (handler (car q))
+                      (e)
+                      (begin
+                        (tree-receipt! (list 'crash name (car q) e))
+                        (tree-decide-and-act! (cadddr (tworker name))
+                                              (list 'worker name))))
+                    #t)))))))
+
+(define (run-tree . opt)
+  (let ((max-steps (if (null? opt) 10000 (car opt))))
+    (let loop ((n 0))
+      (cond ((agents-idle?) (list 'quiescent n))
+            ((>= n max-steps) (list 'hit-max-steps n))
+            (else (begin (tree-step) (loop (+ n 1))))))))
+
+(define (tree-report)
+  (list 'sups (map (lambda (s) (list (car s) (caddr s) (cadddr s))) *tree-sups*)
+        'workers (map (lambda (w) (list (car w) (caddr w))) *tree-workers*)
+        'receipts (length *tree-receipts*)
+        'dead-letters *tree-dead*))

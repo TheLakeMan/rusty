@@ -160,3 +160,94 @@
 
 ;; the name's full evolution history, queryable from the kg
 (display (list 'kg-receipts (evolve-receipts 'worker-math))) (newline)
+
+(display "── certify-strategy: restart-set semantics by exhaustion ──") (newline)
+(display (certify-strategy 'one-for-one)) (newline)
+(display (certify-strategy 'one-for-all)) (newline)
+(display (certify-strategy 'rest-for-one)) (newline)
+
+;; shared fixtures for the tree demos: named counters that report to a
+;; collector living OUTSIDE the strategy's blast radius
+(define *tree-collected* '())
+(define (make-tree-collector)
+  (lambda (msg) (set! *tree-collected* (append *tree-collected* (list msg)))))
+(define (make-named-counter name)
+  (lambda ()
+    (let ((count 0))
+      (lambda (msg)
+        (cond ((equal? msg 'boom) (error "counter crashed"))
+              ((equal? msg 'report) (send! 'collector (list name count)))
+              (else (set! count (+ count 1))))))))
+
+(display "── one-for-all: a crash re-inits every sibling under that sup ──") (newline)
+(set! *tree-collected* '())
+(supervise-tree!
+  (list 'sup 'root '(one-for-one 1)
+        (list 'worker 'collector make-tree-collector)
+        (list 'sup 'pair '(one-for-all 2)
+              (list 'worker 'a (make-named-counter 'a))
+              (list 'worker 'b (make-named-counter 'b)))))
+;; phased runs: the scheduler drains one agent's queue before the next, so
+;; proving b's STATE reset (not just an unprocessed queue) needs b's ticks
+;; handled BEFORE the crash — send, run, then crash, then probe.
+(send! 'a 'tick) (send! 'a 'tick) (send! 'b 'tick)
+(send! 'a 'report) (send! 'b 'report)
+(display (run-tree)) (newline)
+(send! 'a 'boom)                 ; one-for-all → BOTH a and b reset
+(display (run-tree)) (newline)
+(send! 'a 'tick)
+(send! 'a 'report) (send! 'b 'report)
+(display (run-tree)) (newline)
+(display (list 'collector-saw *tree-collected*)) (newline)  ; (a 2)(b 1) then (a 1)(b 0)
+(display (tree-report)) (newline)
+
+(display "── rest-for-one: crash resets the crashed child and later siblings ──") (newline)
+(set! *tree-collected* '())
+(supervise-tree!
+  (list 'sup 'root '(one-for-one 1)
+        (list 'worker 'collector make-tree-collector)
+        (list 'sup 'row '(rest-for-one 2)
+              (list 'worker 'a (make-named-counter 'a))
+              (list 'worker 'b (make-named-counter 'b))
+              (list 'worker 'c (make-named-counter 'c)))))
+(send! 'a 'tick) (send! 'b 'tick) (send! 'c 'tick)
+(display (run-tree)) (newline)
+(send! 'b 'boom)                 ; b crashes → b and c reset, a KEEPS state
+(display (run-tree)) (newline)
+(send! 'a 'report) (send! 'b 'report) (send! 'c 'report)
+(display (run-tree)) (newline)
+(display (list 'collector-saw *tree-collected*)) (newline)  ; (a 1)(b 0)(c 0)
+
+(display "── escalation: budget exhaustion fails the sup as a unit, parent decides ──") (newline)
+;; pair's budget is 1: crash 1 → pair restarts w; crash 2 → pair exhausted
+;; → escalate → root restarts the WHOLE subtree (pair's counter resets —
+;; proven because crash 3 is again handled by pair); crash 4 → pair
+;; exhausted again → escalate → root exhausted → tree-failed; later mail
+;; drains to dead letters.
+(supervise-tree!
+  (list 'sup 'root '(one-for-one 1)
+        (list 'sup 'pair '(one-for-one 1)
+              (list 'worker 'w (make-named-counter 'w)))))
+(send! 'w 'boom) (send! 'w 'boom) (send! 'w 'boom) (send! 'w 'boom)
+(send! 'w 'after-death)
+(display (run-tree)) (newline)
+(display (tree-report)) (newline)
+(display (list 'receipts *tree-receipts*)) (newline)
+
+(display "── re-init crash during tree restart → escalates, never a dead run ──") (newline)
+;; init works once, then throws forever: pair's restart fails → escalate;
+;; root's subtree re-init hits the same throw → root escalates → tree-failed.
+(define *tree-init-uses* 0)
+(define (make-tree-fragile)
+  (begin
+    (set! *tree-init-uses* (+ *tree-init-uses* 1))
+    (if (> *tree-init-uses* 1) (error "init exploded") #f)
+    (lambda (msg) (if (equal? msg 'boom) (error "fragile crashed") #f))))
+(supervise-tree!
+  (list 'sup 'root '(one-for-one 3)
+        (list 'sup 'pair '(one-for-one 3)
+              (list 'worker 'f make-tree-fragile))))
+(send! 'f 'boom)
+(display (run-tree)) (newline)
+(display (tree-report)) (newline)
+(display (list 'receipts *tree-receipts*)) (newline)
