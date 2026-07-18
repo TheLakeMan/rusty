@@ -1487,73 +1487,60 @@ pub fn setup_builtins(env: &Env) {
     // deadline, NOT syscall confinement — the child runs as this user and can
     // touch what this user can. Env is inherited for now (env scrubbing +
     // rlimits are the next knobs); hostile code still needs an OS sandbox.
-    b!("proc-eval", |args| {
-        use std::io::Read;
+    // ── Shared child-process plumbing (proc-eval / proc-pmap) ───────────
+    // ONE spawn/collect/classify path so the serial builtin and the
+    // concurrent one can never drift on isolation, env-scrubbing, or the
+    // result vocabulary. Each helper is a leaf: nothing Rc crosses the
+    // process boundary, only bytes over pipes.
+    //
+    // Spawn a child `rusty` running `code` from a unique temp file (invoked
+    // in the existing file-run mode — it already prints its last result and
+    // reports errors on stderr with a non-zero exit, so no child-side change).
+    // Env is scrubbed to HOME/PATH only: the child does NOT inherit the
+    // parent's secrets or behaviour switches (API keys, RUSTY_* config, the
+    // coverage recorder); HOME/PATH are re-injected so the child's own std
+    // bootstrap (~/.rusty) and any tool it legitimately runs (sh, rustc) work.
+    // Returns the running child + its temp path (caller removes the temp
+    // after collecting output).
+    fn proc_child_spawn(exe: &std::path::Path, code: &str, who: &str)
+        -> Result<(std::process::Child, std::path::PathBuf), String>
+    {
         use std::process::{Command, Stdio};
         use std::sync::atomic::{AtomicU64, Ordering};
-        use std::time::{Duration, Instant};
-        let code = match args.first() {
-            Some(Value::String(s)) => s.clone(),
-            _ => return Err("proc-eval: first argument must be a code string".into()),
-        };
-        let timeout = match args.get(1) {
-            Some(Value::Number(n)) if *n > 0.0 => Duration::from_secs_f64(*n),
-            None => Duration::from_secs(30),
-            _ => return Err("proc-eval: timeout must be a positive number of seconds".into()),
-        };
-        let exe = std::env::current_exe().map_err(|e| format!("proc-eval: {}", e))?;
-        // Unique temp file for the child's code (the child is invoked in
-        // file-run mode, which already prints its last result and reports
-        // errors on stderr with a non-zero exit — no child-side change).
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
         let tmp = std::env::temp_dir()
             .join(format!("rusty-proc-{}-{}.lisp", std::process::id(), n));
-        std::fs::write(&tmp, code.as_bytes()).map_err(|e| format!("proc-eval: {}", e))?;
-        let mut cmd = Command::new(&exe);
+        std::fs::write(&tmp, code.as_bytes()).map_err(|e| format!("{}: {}", who, e))?;
+        let mut cmd = Command::new(exe);
         cmd.arg(&tmp)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // Clean-slate environment: the child does NOT inherit the parent's
-        // secrets or behaviour switches (API keys, RUSTY_* config, the
-        // coverage recorder). HOME and PATH are re-injected so the child's own
-        // std bootstrap (~/.rusty) and any tool it legitimately runs (sh,
-        // rustc) still work. (env-inherit could be a future opt-in flag.)
         cmd.env_clear();
         if let Ok(home) = std::env::var("HOME") { cmd.env("HOME", home); }
         if let Ok(path) = std::env::var("PATH") { cmd.env("PATH", path); }
-        let spawned = cmd.spawn();
-        let mut child = match spawned {
-            Ok(c) => c,
+        match cmd.spawn() {
+            Ok(c) => Ok((c, tmp)),
             Err(e) => { let _ = std::fs::remove_file(&tmp);
-                        return Err(format!("proc-eval: spawn failed: {}", e)); }
-        };
-        // Poll to the deadline; a timed-out child is killed. (A child that
-        // both runs long AND floods stdout could fill the pipe before we
-        // read — beyond Phase A; the deadline cases here produce no output.)
-        let start = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(s)) => break Some(s),
-                Ok(None) => {
-                    if start.elapsed() >= timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break None;
-                    }
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(e) => { let _ = std::fs::remove_file(&tmp);
-                            return Err(format!("proc-eval: {}", e)); }
-            }
-        };
+                        Err(format!("{}: spawn failed: {}", who, e)) }
+        }
+    }
+    // Drain a finished child's stdout/stderr. (A child that both runs long
+    // AND floods stdout could fill the pipe before it exits — beyond scope;
+    // the deadline/verify workloads here produce bounded output.)
+    fn proc_child_output(child: &mut std::process::Child) -> (String, String) {
+        use std::io::Read;
         let mut out = String::new();
         let mut err = String::new();
         if let Some(mut o) = child.stdout.take() { let _ = o.read_to_string(&mut out); }
         if let Some(mut e) = child.stderr.take() { let _ = e.read_to_string(&mut err); }
-        let _ = std::fs::remove_file(&tmp);
-        let result = match status {
+        (out, err)
+    }
+    // Classify a finished (Some) / timed-out (None) child into result DATA:
+    // (ok stdout) | (error stderr code) | (timeout) | (crashed signal).
+    fn proc_child_result(status: Option<std::process::ExitStatus>, out: &str, err: &str) -> Value {
+        match status {
             None => list(vec![Value::Symbol("timeout".into())]),
             Some(s) if s.success() =>
                 list(vec![Value::Symbol("ok".into()),
@@ -1572,8 +1559,137 @@ pub fn setup_builtins(env: &Env) {
                     list(vec![Value::Symbol("crashed".into()), Value::Number(sig as f64)])
                 }
             },
+        }
+    }
+    b!("proc-eval", |args| {
+        use std::time::{Duration, Instant};
+        let code = match args.first() {
+            Some(Value::String(s)) => s.clone(),
+            _ => return Err("proc-eval: first argument must be a code string".into()),
         };
-        Ok(result)
+        let timeout = match args.get(1) {
+            Some(Value::Number(n)) if *n > 0.0 => Duration::from_secs_f64(*n),
+            None => Duration::from_secs(30),
+            _ => return Err("proc-eval: timeout must be a positive number of seconds".into()),
+        };
+        let exe = std::env::current_exe().map_err(|e| format!("proc-eval: {}", e))?;
+        let (mut child, tmp) = proc_child_spawn(&exe, &code, "proc-eval")?;
+        // Poll to the deadline; a timed-out child is killed.
+        let start = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(s)) => break Some(s),
+                Ok(None) => {
+                    if start.elapsed() >= timeout {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break None;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => { let _ = std::fs::remove_file(&tmp);
+                            return Err(format!("proc-eval: {}", e)); }
+            }
+        };
+        let (out, err) = proc_child_output(&mut child);
+        let _ = std::fs::remove_file(&tmp);
+        Ok(proc_child_result(status, &out, &err))
+    });
+
+    // (proc-pmap code-list [timeout-secs] [max-workers]) runs each code string
+    // in its OWN child `rusty` process, up to max-workers CONCURRENTLY, and
+    // returns a list of result data — one per input, IN INPUT ORDER regardless
+    // of which child finishes first or how many workers run. That order-
+    // independence is the whole point: the ONE real multicore path off the
+    // Rc-based single-threaded core, with a DETERMINISTIC result. Each element
+    // is the same shape as proc-eval: (ok stdout) | (error stderr code) |
+    // (timeout) | (crashed signal). Same env-scrubbing and same per-child
+    // wall-clock deadline; same HONEST SCOPE (fault isolation + a deadline,
+    // NOT syscall confinement — a child runs as this user). max-workers
+    // defaults to the machine's parallelism; results are collected by input
+    // index, never by completion order, so worker count changes speed, never
+    // the answer.
+    b!("proc-pmap", |args| {
+        use std::time::{Duration, Instant};
+        type Running = (usize, std::process::Child, std::path::PathBuf, Instant);
+        let codes: Vec<String> = match args.first() {
+            Some(Value::List(items)) => {
+                let mut v = Vec::with_capacity(items.len());
+                for it in items.iter() {
+                    match it {
+                        Value::String(s) => v.push(s.clone()),
+                        _ => return Err("proc-pmap: every element of the first argument must be a code string".into()),
+                    }
+                }
+                v
+            }
+            _ => return Err("proc-pmap: first argument must be a list of code strings".into()),
+        };
+        let timeout = match args.get(1) {
+            Some(Value::Number(n)) if *n > 0.0 => Duration::from_secs_f64(*n),
+            None => Duration::from_secs(30),
+            _ => return Err("proc-pmap: timeout must be a positive number of seconds".into()),
+        };
+        let default_workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let max_workers = match args.get(2) {
+            Some(Value::Number(n)) if *n >= 1.0 => *n as usize,
+            None => default_workers,
+            _ => return Err("proc-pmap: max-workers must be a positive integer".into()),
+        };
+        if codes.is_empty() { return Ok(list(vec![])); }
+        let exe = std::env::current_exe().map_err(|e| format!("proc-pmap: {}", e))?;
+        let n_jobs = codes.len();
+        let cap = max_workers.max(1).min(n_jobs);
+        let mut results: Vec<Option<Value>> = (0..n_jobs).map(|_| None).collect();
+        let mut running: Vec<Running> = Vec::new();
+        let mut next = 0usize;
+        // Reap everything still running — used on an early error return so we
+        // never leak child processes or temp files.
+        fn reap(running: &mut Vec<Running>) {
+            for (_, mut child, tmp, _) in running.drain(..) {
+                let _ = child.kill(); let _ = child.wait();
+                let _ = std::fs::remove_file(&tmp);
+            }
+        }
+        loop {
+            // Top up the worker pool.
+            while running.len() < cap && next < n_jobs {
+                match proc_child_spawn(&exe, &codes[next], "proc-pmap") {
+                    Ok((child, tmp)) => running.push((next, child, tmp, Instant::now())),
+                    Err(e) => { reap(&mut running); return Err(e); }
+                }
+                next += 1;
+            }
+            if running.is_empty() { break; }
+            // One non-blocking pass over the running children.
+            let mut progressed = false;
+            let mut i = 0;
+            while i < running.len() {
+                let status = match running[i].1.try_wait() {
+                    Ok(Some(s)) => Some(Some(s)),
+                    Ok(None) => {
+                        if running[i].3.elapsed() >= timeout {
+                            let _ = running[i].1.kill();
+                            let _ = running[i].1.wait();
+                            Some(None)
+                        } else { None }
+                    }
+                    Err(e) => { reap(&mut running); return Err(format!("proc-pmap: {}", e)); }
+                };
+                match status {
+                    Some(s) => {
+                        let (idx, mut child, tmp, _) = running.remove(i);
+                        let (out, err) = proc_child_output(&mut child);
+                        let _ = std::fs::remove_file(&tmp);
+                        results[idx] = Some(proc_child_result(s, &out, &err));
+                        progressed = true;
+                    }
+                    None => { i += 1; }
+                }
+            }
+            if !progressed { std::thread::sleep(Duration::from_millis(5)); }
+        }
+        Ok(list(results.into_iter().map(|r| r.expect("proc-pmap: slot filled")).collect()))
     });
 
     // ── Filesystem (all classified effectful in effect_check.rs) ─────────

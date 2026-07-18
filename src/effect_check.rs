@@ -23,7 +23,7 @@ pub fn effect_reason(op: &str) -> Option<&'static str> {
         "print" | "println" | "display" | "newline" => Some("performs I/O"),
         "error" => Some("raises an error (a control-flow side effect)"),
         "shell" | "shell-run" => Some("runs a shell command"),
-        "proc-eval" => Some("spawns a subprocess"),
+        "proc-eval" | "proc-pmap" => Some("spawns a subprocess"),
         "read-file" | "write-file" | "append-file" | "delete-file" | "file-exists" | "list-dir"
         | "file-read" | "file-write" | "file-append" | "file-delete" | "file-exists?"
         | "dir-create" | "dir-list" | "file-realpath" | "file-symlink?" | "file-hash"

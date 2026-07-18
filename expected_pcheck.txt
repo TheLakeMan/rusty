@@ -1,0 +1,11 @@
+(safe-serial verified)
+(safe-parallel-verdict verified)
+(safe-equal-serial #t)
+(safe-worker-independent #t)
+(wild-serial (((15) false) ((16) false) ((17) false) ((18) false) ((19) false) ((20) false)))
+(wild-parallel (((15) false) ((16) false) ((17) false) ((18) false) ((19) false) ((20) false)))
+(wild-equal-serial #t)
+(wild-order-preserved #t)
+(hang-incomplete-not-verified #t)
+(hang-verdict (pcheck-incomplete (timeout)))
+PCHECK TESTS DONE
