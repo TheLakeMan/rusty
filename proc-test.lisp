@@ -30,4 +30,23 @@
 ;; A non-string program is refused as an error, never a crash.
 (println (list 'needs-string (try-catch (proc-eval 42) (e) (list 'rejected e))))
 
+;; Env-scrubbing: the child runs on a clean-slate environment — it does NOT
+;; inherit the parent's secrets/config. run_tests.sh exports PROC_SANDBOX_SENTINEL
+;; to the PARENT for this run; the child must still read it as empty. (HOME/PATH
+;; are re-injected so the child's own std bootstrap and tools still work.)
+(println (list 'child-cannot-read-parent-env
+               (proc-eval "(shell \"printf %s $PROC_SANDBOX_SENTINEL\")")))
+
+;; ── Phase B: replay-verified records ─────────────────────────────────────
+(load "proc.lisp")
+;; A recorded run re-executes to the same result — replay IS the audit.
+(define rec (proc-run "(apply + (range 1 11))"))     ; sum 1..10 = 55
+(println (list 'record rec))
+(println (list 'replays-verified (proc-replay rec)))
+(println (list 'verified-pred (proc-verified? rec)))
+;; Tamper the recorded RESULT — replay catches it (proves the check bites,
+;; and that a self-consistent record is the only thing replay can vouch for).
+(define forged (list 'proc-run "(apply + (range 1 11))" 30 (list 'ok "999")))
+(println (list 'forged-result-caught (proc-replay forged)))
+
 (println "PROC TESTS DONE")

@@ -1510,11 +1510,20 @@ pub fn setup_builtins(env: &Env) {
         let tmp = std::env::temp_dir()
             .join(format!("rusty-proc-{}-{}.lisp", std::process::id(), n));
         std::fs::write(&tmp, code.as_bytes()).map_err(|e| format!("proc-eval: {}", e))?;
-        let spawned = Command::new(&exe).arg(&tmp)
+        let mut cmd = Command::new(&exe);
+        cmd.arg(&tmp)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
+            .stderr(Stdio::piped());
+        // Clean-slate environment: the child does NOT inherit the parent's
+        // secrets or behaviour switches (API keys, RUSTY_* config, the
+        // coverage recorder). HOME and PATH are re-injected so the child's own
+        // std bootstrap (~/.rusty) and any tool it legitimately runs (sh,
+        // rustc) still work. (env-inherit could be a future opt-in flag.)
+        cmd.env_clear();
+        if let Ok(home) = std::env::var("HOME") { cmd.env("HOME", home); }
+        if let Ok(path) = std::env::var("PATH") { cmd.env("PATH", path); }
+        let spawned = cmd.spawn();
         let mut child = match spawned {
             Ok(c) => c,
             Err(e) => { let _ = std::fs::remove_file(&tmp);

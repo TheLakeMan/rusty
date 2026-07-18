@@ -6,4 +6,9 @@
 (parent-x-unchanged 99)
 (effect-surfaced (proc-eval: spawns a subprocess))
 (needs-string (rejected proc-eval: first argument must be a code string))
+(child-cannot-read-parent-env (ok ))
+(record (proc-run (apply + (range 1 11)) 30 (ok 55)))
+(replays-verified verified)
+(verified-pred #t)
+(forged-result-caught (diverged (claimed (ok 999)) (got (ok 55))))
 PROC TESTS DONE

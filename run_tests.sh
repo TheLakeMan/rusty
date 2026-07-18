@@ -45,7 +45,8 @@ run_test "supervisor-test.lisp" "expected_supervisor.txt" "supervisor-test.lisp 
 run_test "kg-test.lisp"      "expected_kg.txt"     "kg-test.lisp (knowledge graph)"
 run_test "discover-test.lisp" "expected_discover.txt" "discover-test.lisp (command registry)"
 run_test "commands-test.lisp" "expected_commands.txt" "commands-test.lisp (command smoke)"
-run_test "proc-test.lisp"    "expected_proc.txt"   "proc-test.lisp (multi-process seam)"
+# the sentinel proves env-scrubbing: the parent has it, the isolated child must not
+PROC_SANDBOX_SENTINEL=leaked run_test "proc-test.lisp" "expected_proc.txt" "proc-test.lisp (multi-process seam)"
 
 # rusty-lsp speaks framed JSON-RPC on stdio — a scripted session instead of a golden diff
 if python3 lsp-test.py > /dev/null 2>&1; then
