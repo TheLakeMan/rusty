@@ -7,7 +7,10 @@ license = "AGPL-3.0-or-later"   # commercial licensing available on inquiry
 repository = "https://github.com/TheLakeMan/rusty"
 readme = "README.md"
 default-run = "rusty"   # `cargo run` starts the REPL (not rusty-lsp)
-include = ["src/**", "*.lisp", "Cargo.toml", "README.md", "LICENSE*", "docs/SPEC.md", "docs/TUTORIAL.md"]
+# Leading "/" anchors to the package root: an unanchored glob like "*.lisp" or
+# "README.md" matches at ANY depth (gitignore semantics) and would slurp local-
+# only files (.claude/**, my-project/README.md) into the published crate.
+include = ["src/**", "/*.lisp", "/Cargo.toml", "/README.md", "/LICENSE*", "docs/SPEC.md", "docs/TUTORIAL.md"]
 
 [[bin]]
 name = "rusty"
