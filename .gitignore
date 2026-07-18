@@ -4,3 +4,11 @@ docs/GTM-ONEPAGER.md
 docs/superpowers/
 docs/From copilot.txt
 docs/CENTURY.md
+
+# Local-only — not the workings of running Rusty or its apps; never push.
+.claude/
+CLAUDE.md
+my-project/
+notes/
+samples.txt
+simplelisp.py
