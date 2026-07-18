@@ -1,0 +1,9 @@
+(ok-simple (ok 3))
+(ok-stdlib (ok 5050))
+(child-error (error Error: car: not a pair 1))
+(timeout-killed (timeout))
+(child-result (ok 2))
+(parent-x-unchanged 99)
+(effect-surfaced (proc-eval: spawns a subprocess))
+(needs-string (rejected proc-eval: first argument must be a code string))
+PROC TESTS DONE

@@ -1475,6 +1475,98 @@ pub fn setup_builtins(env: &Env) {
         }
     });
 
+    // ── Multi-process seam (Phase A, experimental) ────────────────────────
+    // (proc-eval code-string [timeout-secs]) runs `code` in a CHILD `rusty`
+    // process and returns its result as DATA — never a raised panic. The
+    // child is a full, separate interpreter (its own env, its own memory);
+    // the Rusty core is Rc-based single-threaded on purpose, so NOTHING Rc
+    // crosses the boundary — only bytes over pipes do. That buys real memory
+    // isolation and independent failure (a child infinite-loop / crash cannot
+    // take the parent down): (ok stdout) | (error stderr code) | (timeout) |
+    // (crashed signal). HONEST SCOPE: this is fault-isolation + a wall-clock
+    // deadline, NOT syscall confinement — the child runs as this user and can
+    // touch what this user can. Env is inherited for now (env scrubbing +
+    // rlimits are the next knobs); hostile code still needs an OS sandbox.
+    b!("proc-eval", |args| {
+        use std::io::Read;
+        use std::process::{Command, Stdio};
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::time::{Duration, Instant};
+        let code = match args.first() {
+            Some(Value::String(s)) => s.clone(),
+            _ => return Err("proc-eval: first argument must be a code string".into()),
+        };
+        let timeout = match args.get(1) {
+            Some(Value::Number(n)) if *n > 0.0 => Duration::from_secs_f64(*n),
+            None => Duration::from_secs(30),
+            _ => return Err("proc-eval: timeout must be a positive number of seconds".into()),
+        };
+        let exe = std::env::current_exe().map_err(|e| format!("proc-eval: {}", e))?;
+        // Unique temp file for the child's code (the child is invoked in
+        // file-run mode, which already prints its last result and reports
+        // errors on stderr with a non-zero exit — no child-side change).
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp = std::env::temp_dir()
+            .join(format!("rusty-proc-{}-{}.lisp", std::process::id(), n));
+        std::fs::write(&tmp, code.as_bytes()).map_err(|e| format!("proc-eval: {}", e))?;
+        let spawned = Command::new(&exe).arg(&tmp)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        let mut child = match spawned {
+            Ok(c) => c,
+            Err(e) => { let _ = std::fs::remove_file(&tmp);
+                        return Err(format!("proc-eval: spawn failed: {}", e)); }
+        };
+        // Poll to the deadline; a timed-out child is killed. (A child that
+        // both runs long AND floods stdout could fill the pipe before we
+        // read — beyond Phase A; the deadline cases here produce no output.)
+        let start = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(s)) => break Some(s),
+                Ok(None) => {
+                    if start.elapsed() >= timeout {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break None;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => { let _ = std::fs::remove_file(&tmp);
+                            return Err(format!("proc-eval: {}", e)); }
+            }
+        };
+        let mut out = String::new();
+        let mut err = String::new();
+        if let Some(mut o) = child.stdout.take() { let _ = o.read_to_string(&mut out); }
+        if let Some(mut e) = child.stderr.take() { let _ = e.read_to_string(&mut err); }
+        let _ = std::fs::remove_file(&tmp);
+        let result = match status {
+            None => list(vec![Value::Symbol("timeout".into())]),
+            Some(s) if s.success() =>
+                list(vec![Value::Symbol("ok".into()),
+                          Value::String(out.trim_end().to_string())]),
+            Some(s) => match s.code() {
+                Some(code) => list(vec![Value::Symbol("error".into()),
+                                        Value::String(err.trim_end().to_string()),
+                                        Value::Number(code as f64)]),
+                None => {
+                    // No exit code = killed by a signal (e.g. a segfault).
+                    #[cfg(unix)]
+                    let sig = { use std::os::unix::process::ExitStatusExt;
+                                s.signal().unwrap_or(-1) };
+                    #[cfg(not(unix))]
+                    let sig = -1;
+                    list(vec![Value::Symbol("crashed".into()), Value::Number(sig as f64)])
+                }
+            },
+        };
+        Ok(result)
+    });
+
     // ── Filesystem (all classified effectful in effect_check.rs) ─────────
     cat!("filesystem");
     // These existed only as agent-tool NAMES until 0.26.0 — the tool
