@@ -25,9 +25,17 @@
   "fix.lisp"
   "(define (fix-answer x) (+ (dep-triple x) 1))")
 
+;; A package whose body ADMITS effects (defining these functions runs nothing;
+;; the effects live in their bodies, which is exactly what disclosure surfaces).
+(make-fixture "/tmp/rusty-pkg-eff"
+  "((name \"rusty-pkg-eff\") (version \"0.2.0\") (main \"eff.lisp\"))"
+  "eff.lisp"
+  "(define (touch p) (file-write p \"x\"))\n(define (show x) (println x))")
+
 ;; start clean (idempotent re-runs)
 (pkg-remove "rusty-pkg-fix")
 (pkg-remove "rusty-pkg-dep")
+(pkg-remove "rusty-pkg-eff")
 
 ;; ── Install: pulls the dependency transitively ───────────────────────────
 (print (pkg-install "file:///tmp/rusty-pkg-fix"))
@@ -46,6 +54,24 @@
 (print (try-catch (pkg-load "no-such-package") (e) (list 'rejected e)))
 (shell "rm -rf /tmp/rusty-not-a-pkg && mkdir -p /tmp/rusty-not-a-pkg && cd /tmp/rusty-not-a-pkg && git init -q && git -c user.email=t@t -c user.name=t commit -qm empty --allow-empty")
 (print (try-catch (pkg-install "file:///tmp/rusty-not-a-pkg") (e) (list 'rejected e)))
+
+;; ── Effect disclosure: what does a package admit it DOES? ────────────────
+;; Orthogonal to integrity (sameness): this walks the file pkg-load would run,
+;; WITHOUT running it, and names every effectful operation it admits.
+(print (pkg-install "file:///tmp/rusty-pkg-eff"))
+(print (list 'pure-pkg-effects (pkg-effects "rusty-pkg-dep")))       ; math util → pure
+(print (list 'eff-pkg-effects (pkg-effects "rusty-pkg-eff")))        ; admits file I/O + print
+(print (list 'eff-pkg-ops (pkg-effect-ops "rusty-pkg-eff")))         ; deduped op symbols
+(print (list 'uninstalled-effects (pkg-effects "no-such-package")))  ; #f, not a crash
+;; The gate refuses to load a package that admits an effect you didn't allow,
+;; naming the surprise — and does NOT load it (show stays undefined here).
+(print (list 'gate-refuses-undeclared (pkg-load-checked "rusty-pkg-eff" '(file-write))))
+;; ...and loads it when everything it admits is allowed (defines only, no output)
+(print (list 'gate-loads-when-allowed (pkg-load-checked "rusty-pkg-eff" '(file-write println))))
+(print (list 'gated-load-defined-it (procedure? show)))             ; now bound
+;; a pure package needs no allowances
+(print (list 'gate-loads-pure (pkg-load-checked "rusty-pkg-dep" '())))
+(print (list 'gate-on-missing (pkg-load-checked "no-such-package" '())))
 
 ;; ── Integrity: is this still what I installed? ───────────────────────────
 ;; Hashes themselves stay out of the golden (they'd be noise); what's pinned is
@@ -84,7 +110,8 @@
 (print (pkg-remove "rusty-pkg-fix"))
 (print (list 'lock-removed-with-package (pkg-locked? "rusty-pkg-fix")))
 (print (pkg-remove "rusty-pkg-dep"))
+(print (pkg-remove "rusty-pkg-eff"))
 (print (pkg-remove "rusty-pkg-fix"))                ; already gone
-(shell "rm -rf /tmp/rusty-pkg-fix /tmp/rusty-pkg-dep /tmp/rusty-not-a-pkg")
+(shell "rm -rf /tmp/rusty-pkg-fix /tmp/rusty-pkg-dep /tmp/rusty-pkg-eff /tmp/rusty-not-a-pkg")
 
 (print "PKG TESTS DONE")

@@ -63,12 +63,19 @@
                 (list 'installed (pkg-get m 'name name)
                       (pkg-get m 'version "?"))))))))
 
+;; The file `pkg-load` runs: the manifest's `main`, defaulting to <name>.lisp.
+;; pkg-load and pkg-effects both go through this, so "the file that runs" and
+;; "the file we inspect" can never drift apart.
+(define (pkg-main-path name)
+  (let ((m (pkg-read-manifest (pkg-dir name))))
+    (string-append (pkg-dir name) "/"
+                   (pkg-get m 'main (string-append name ".lisp")))))
+
 (define (pkg-load name)
   (if (not (pkg-installed? name))
       (error (format "pkg-load: ~a is not installed" name))
       (let ((m (pkg-read-manifest (pkg-dir name))))
-        (load (string-append (pkg-dir name) "/"
-                             (pkg-get m 'main (string-append name ".lisp"))))
+        (load (pkg-main-path name))
         (list 'loaded (pkg-get m 'name name) (pkg-get m 'version "?")))))
 
 (define (require-package url . opt)
@@ -76,6 +83,55 @@
     (when (not (pkg-installed? name))
       (apply pkg-install (cons url opt)))
     (pkg-load name)))
+
+;; ── Effect disclosure (what a package ADMITS to doing) ─────────────────────
+;; Integrity (below) proves SAMENESS. This asks an orthogonal question: what
+;; does this package's code admit it does? check-effects walks a body WITHOUT
+;; running it; here we point it at the very file pkg-load would execute. The
+;; file's top-level forms are wrapped in one (lambda () ...) — building the
+;; closure runs nothing — and the real Rust effect walker reports every
+;; effectful operation it finds (shell, file I/O, load, ...).
+;;
+;; HONEST SCOPE — this is DISCLOSURE, never a sandbox:
+;;   1. It inspects the MAIN file only. A (load "other.lisp") inside it is
+;;      itself surfaced as an effect ("there is more code here I did not read"),
+;;      but that other file's contents are not walked.
+;;   2. It surfaces every effect NAMED anywhere in the main file — including
+;;      inside a helper this file defines (that body is walked too). The blind
+;;      spot is an effect reachable only through code NOT in this file: a
+;;      DEPENDENCY's function, or a file this one `load`s. check-effects is
+;;      conservative — an unrecognized/user-defined call is never flagged — so
+;;      it reports what the file ADMITS, and can never prove what it CANNOT do.
+;;   3. A pass from pkg-load-checked means "admits nothing beyond what you
+;;      allowed", never "safe to run".
+(define (pkg-effects name)
+  (if (not (pkg-installed? name))
+      #f
+      (let ((forms (eval-string
+                     (string-append "(quote (" (file-read (pkg-main-path name)) "))"))))
+        (if (null? forms)
+            'pure
+            (check-effects (eval (cons 'lambda (cons '() forms))))))))
+
+;; The deduped effect OPERATION symbols (the same shape undeclared-effects /
+;; safe-call use): #f if not installed, '() if pure, else e.g. (shell load).
+(define (pkg-effect-ops name)
+  (let ((e (pkg-effects name)))
+    (cond ((not e) #f)
+          ((equal? e 'pure) '())
+          (else (remove-duplicates (map finding-op e))))))
+
+;; Effect-gated load: load only if every operation the package admits is in
+;; `allowed` (a list of op symbols). Otherwise refuse WITHOUT loading and name
+;; the operations you did not allow. Refuse-by-disclosure, not a sandbox.
+(define (pkg-load-checked name allowed)
+  (let ((ops (pkg-effect-ops name)))
+    (if (not ops)
+        (list 'not-installed name)
+        (let ((undeclared (filter (lambda (op) (not (member op allowed))) ops)))
+          (if (null? undeclared)
+              (pkg-load name)
+              (list 'refused name (cons 'undeclared undeclared)))))))
 
 (define (pkg-list)
   (if (file-exists? (pkg-root))
@@ -187,8 +243,9 @@
 
 ;; Give the package manager its own help category (embedded + auto-loaded into
 ;; every env, so these appear in (help)/(apropos)/(command-registry) unprefixed).
-;; Without this the 24 pkg-* names all fall into "other".
+;; Without this the pkg-* names all fall into "other".
 (categorize! 'pkg '(pkg-root pkg-dir pkg-manifest-path pkg-installed? pkg-read-manifest
-  pkg-get pkg-strip-git pkg-url-name pkg-install pkg-load require-package pkg-list
+  pkg-get pkg-strip-git pkg-url-name pkg-install pkg-main-path pkg-load require-package
+  pkg-effects pkg-effect-ops pkg-load-checked pkg-list
   pkg-dir? pkg-files pkg-fingerprint pkg-fp-lookup pkg-fp-diff pkg-verify
   pkg-lock-root pkg-lock-path pkg-locked? pkg-lock! pkg-drift pkg-remove))
