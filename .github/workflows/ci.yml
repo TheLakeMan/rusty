@@ -47,10 +47,10 @@ jobs:
         with:
           name: golden-file-diff
           path: |
-            expected_*.txt
-            tests.lisp
-            new-features.lisp
-            hello.lisp
+            tests/expected_*.txt
+            tests/tests.lisp
+            tests/new-features.lisp
+            tests/hello.lisp
 
   # ── Lint ─────────────────────────────────────────────────────────────────
   clippy:

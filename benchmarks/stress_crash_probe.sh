@@ -17,7 +17,7 @@
 # below should now read a clean error or a bounded OK, never ABORT.  NOT a
 # golden (a regression aborts by design); run by hand to confirm the fix holds
 # and to re-measure thresholds.  Deterministic guard coverage lives in the
-# golden suite (the rb-* rows in new-features.lisp).
+# golden suite (the rb-* rows in tests/new-features.lisp).
 #
 # Usage:  ./benchmarks/stress_crash_probe.sh   (from the repo root)
 

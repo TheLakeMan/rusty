@@ -8,7 +8,7 @@
 ;;; Capture the registry BEFORE defining any helper functions — (command-registry)
 ;;; walks every callable binding in the global env, so top-level helpers would
 ;;; otherwise appear as "untested commands".
-(load "coverage-allowlist.lisp")
+(load "tests/coverage-allowlist.lisp")
 
 (define all-names (map car (command-registry)))
 

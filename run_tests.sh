@@ -30,27 +30,32 @@ echo "Building..."
 cargo build --release 2>&1 | grep -E "^error|Finished"
 echo
 
-run_test "tests.lisp"        "expected_tests.txt"  "tests.lisp"
-run_test "new-features.lisp" "expected_new.txt"    "new-features.lisp"
-run_test "hello.lisp"        "expected_hello.txt"  "hello.lisp"
-run_test "swarm.lisp"        "expected_swarm.txt"  "swarm.lisp (multi-agent synthesis)"
-run_test "symreg-test.lisp"  "expected_symreg.txt" "symreg-test.lisp (equation discovery)"
-run_test "synth-test.lisp"   "expected_synth.txt"  "synth-test.lisp (sketch synthesis)"
-run_test "prover-test.lisp"  "expected_prover.txt" "prover-test.lisp (proof assistant)"
-run_test "robot-test.lisp"   "expected_robot.txt"  "robot-test.lisp (safe control)"
-run_test "pkg-test.lisp"     "expected_pkg.txt"    "pkg-test.lisp (package manager)"
-run_test "testkit-test.lisp" "expected_testkit.txt" "testkit-test.lisp (testing framework)"
-run_test "evolve-test.lisp"  "expected_evolve.txt"  "evolve-test.lisp (self-optimization with receipts)"
-run_test "supervisor-test.lisp" "expected_supervisor.txt" "supervisor-test.lisp (certifiable supervision)"
-run_test "kg-test.lisp"      "expected_kg.txt"     "kg-test.lisp (knowledge graph)"
-run_test "discover-test.lisp" "expected_discover.txt" "discover-test.lisp (command registry)"
-run_test "commands-test.lisp" "expected_commands.txt" "commands-test.lisp (command smoke)"
+# Test drivers + golden expected outputs live under tests/. Libraries they load
+# by name — std.lisp, swarm.lisp, kg.lisp, symreg.lisp, ... — stay at the repo
+# root (load is CWD-relative and this script runs from root; std/pkg are also
+# embedded via include_str! and ship in the crate). So a driver's file path is
+# tests/… but a library run directly as a golden (swarm.lisp) keeps its root path.
+run_test "tests/tests.lisp"        "tests/expected_tests.txt"  "tests.lisp"
+run_test "tests/new-features.lisp" "tests/expected_new.txt"    "new-features.lisp"
+run_test "tests/hello.lisp"        "tests/expected_hello.txt"  "hello.lisp"
+run_test "swarm.lisp"              "tests/expected_swarm.txt"  "swarm.lisp (multi-agent synthesis)"
+run_test "tests/symreg-test.lisp"  "tests/expected_symreg.txt" "symreg-test.lisp (equation discovery)"
+run_test "tests/synth-test.lisp"   "tests/expected_synth.txt"  "synth-test.lisp (sketch synthesis)"
+run_test "tests/prover-test.lisp"  "tests/expected_prover.txt" "prover-test.lisp (proof assistant)"
+run_test "tests/robot-test.lisp"   "tests/expected_robot.txt"  "robot-test.lisp (safe control)"
+run_test "tests/pkg-test.lisp"     "tests/expected_pkg.txt"    "pkg-test.lisp (package manager)"
+run_test "tests/testkit-test.lisp" "tests/expected_testkit.txt" "testkit-test.lisp (testing framework)"
+run_test "tests/evolve-test.lisp"  "tests/expected_evolve.txt"  "evolve-test.lisp (self-optimization with receipts)"
+run_test "tests/supervisor-test.lisp" "tests/expected_supervisor.txt" "supervisor-test.lisp (certifiable supervision)"
+run_test "tests/kg-test.lisp"      "tests/expected_kg.txt"     "kg-test.lisp (knowledge graph)"
+run_test "tests/discover-test.lisp" "tests/expected_discover.txt" "discover-test.lisp (command registry)"
+run_test "tests/commands-test.lisp" "tests/expected_commands.txt" "commands-test.lisp (command smoke)"
 # the sentinel proves env-scrubbing: the parent has it, the isolated child must not
-PROC_SANDBOX_SENTINEL=leaked run_test "proc-test.lisp" "expected_proc.txt" "proc-test.lisp (multi-process seam)"
-run_test "pcheck-test.lisp"  "expected_pcheck.txt" "pcheck-test.lisp (parallel check-exhaustive)"
+PROC_SANDBOX_SENTINEL=leaked run_test "tests/proc-test.lisp" "tests/expected_proc.txt" "proc-test.lisp (multi-process seam)"
+run_test "tests/pcheck-test.lisp"  "tests/expected_pcheck.txt" "pcheck-test.lisp (parallel check-exhaustive)"
 
 # rusty-lsp speaks framed JSON-RPC on stdio — a scripted session instead of a golden diff
-if python3 lsp-test.py > /dev/null 2>&1; then
+if python3 tests/lsp-test.py > /dev/null 2>&1; then
     echo "✅  lsp-test.py (language server)"
     PASS=$((PASS+1))
 else
@@ -61,14 +66,16 @@ fi
 # ── Coverage ratchet ────────────────────────────────────────────────────────
 COVFILE="$(mktemp)"
 export RUSTY_COVERAGE_FILE="$COVFILE"
-for f in tests.lisp new-features.lisp hello.lisp swarm.lisp symreg-test.lisp \
-         synth-test.lisp prover-test.lisp robot-test.lisp pkg-test.lisp \
-         testkit-test.lisp kg-test.lisp discover-test.lisp commands-test.lisp \
-         proc-test.lisp pcheck-test.lisp evolve-test.lisp supervisor-test.lisp; do
+for f in tests/tests.lisp tests/new-features.lisp tests/hello.lisp swarm.lisp \
+         tests/symreg-test.lisp tests/synth-test.lisp tests/prover-test.lisp \
+         tests/robot-test.lisp tests/pkg-test.lisp tests/testkit-test.lisp \
+         tests/kg-test.lisp tests/discover-test.lisp tests/commands-test.lisp \
+         tests/proc-test.lisp tests/pcheck-test.lisp tests/evolve-test.lisp \
+         tests/supervisor-test.lisp; do
     RUSTY_COVERAGE=1 "$RUSTY" "$f" >/dev/null 2>&1
 done
 # check runs WITHOUT RUSTY_COVERAGE so it doesn't record itself
-run_test "coverage-check.lisp" "expected_coverage.txt" "coverage-check.lisp (ratchet)"
+run_test "tests/coverage-check.lisp" "tests/expected_coverage.txt" "coverage-check.lisp (ratchet)"
 unset RUSTY_COVERAGE_FILE
 rm -f "$COVFILE"
 
