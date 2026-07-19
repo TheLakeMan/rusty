@@ -116,6 +116,9 @@ LLM (planner)     → decides what to do
 Rusty (executor)  → deterministically does it
 ```
 
+<details>
+<summary><b>Agent tool &amp; LLM forms</b> — deftool, tool-call, list-tools, react-loop, llm (click to expand)</summary>
+
 ### deftool — Register Agent Tools
 
 ```lisp
@@ -192,6 +195,8 @@ cmake -B build && cmake --build build --config Release -j
 Override the defaults with env vars if needed: `RUSTY_LLM_URL`, `RUSTY_MODEL`,
 `RUSTY_LLM_TIMEOUT_SECS` (default 120 — raise it for slow reasoning models).
 
+</details>
+
 ---
 
 ## Built-in Tools (agent-tools.lisp)
@@ -239,6 +244,9 @@ maturin build          # build wheel for distribution
 ---
 
 ## Language Reference
+
+<details>
+<summary><b>Full language reference</b> — special forms, macros, native codegen, Graph IR, tensors, actors, tracing, and the standard library (click to expand)</summary>
 
 ### Core Special Forms
 
@@ -723,6 +731,8 @@ map* filter* foldl*  ; pipeline-friendly (list-first)
 ; checkpoint/restore (roadmap 3.2), not model data:
 (save-model "f.json" (lambda (x) x))   ; => error
 ```
+
+</details>
 
 ---
 
