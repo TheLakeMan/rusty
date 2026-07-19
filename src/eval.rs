@@ -84,6 +84,12 @@ struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
     temperature: f32,
+    // Omit when unset rather than sending `null`: strict OpenAI-compatible
+    // servers (e.g. current llama-server, b9873) reject `"max_tokens": null`
+    // with a 400 ("type must be number, but is null") — which surfaced as a
+    // confusing "response parse error" because the 400 body isn't a
+    // ChatResponse. A bare `(llm "...")` passes None here.
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
 }
 
