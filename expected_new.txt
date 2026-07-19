@@ -76,3 +76,4 @@ refused
 (lx-capture 7 lx-letstar 33 lx-named-let 10)
 (lx-grad 6 lx-effects ("file-read: touches the filesystem"))
 (lx-shadow-builtin 10)
+(rb-recursion refused rb-nesting refused rb-drop ok)

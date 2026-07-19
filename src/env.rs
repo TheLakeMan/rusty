@@ -33,6 +33,39 @@ struct ListBuf {
     floor: std::cell::Cell<usize>,
 }
 
+// Dropping a deeply *nested* list (a chain of single-element lists, or any
+// list-of-list-of-... structure) would otherwise recurse on the native stack —
+// each ListBuf drop dropping a Value::List whose ListBuf drop drops another —
+// and overflow (an unrecoverable Rust abort) past ~150k depth. Dismantle
+// iteratively through a heap work-list instead, so nesting depth costs heap,
+// not stack. Only engaged when a cell actually holds a solely-owned nested list
+// (the `Rc::try_unwrap` gate), so flat lists and shared tails pay nothing beyond
+// the normal per-element drop.
+impl Drop for ListBuf {
+    fn drop(&mut self) {
+        let mut pending: Vec<Value> = Vec::new();
+        // Seed with this buffer's own cells, then walk owned nested buffers.
+        for cell in self.cells.drain(..) {
+            if let Value::List(ls) = cell.into_inner() {
+                // try_unwrap succeeds only when we're the sole owner; a shared
+                // buffer is left for its other owner to drop.
+                if let Ok(mut buf) = Rc::try_unwrap(ls.data) {
+                    // Take its cells before `buf` drops, so buf's Drop sees an
+                    // empty Vec and does not recurse.
+                    pending.extend(buf.cells.drain(..).map(|c| c.into_inner()));
+                }
+            }
+        }
+        while let Some(v) = pending.pop() {
+            if let Value::List(ls) = v {
+                if let Ok(mut buf) = Rc::try_unwrap(ls.data) {
+                    pending.extend(buf.cells.drain(..).map(|c| c.into_inner()));
+                }
+            }
+        }
+    }
+}
+
 impl ListBuf {
     /// gap Nil-slots in front, then `head`, then `tail` — the layout the
     /// cons slow path allocates so subsequent conses are O(1) in-place.
@@ -193,6 +226,16 @@ pub enum Value {
     Nil,
 }
 
+// Display recursion guard — see the List arm below and interp::print_repr.
+const MAX_DISPLAY_DEPTH: usize = 4_000;
+thread_local! {
+    static DISPLAY_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+struct DisplayDepthGuard;
+impl Drop for DisplayDepthGuard {
+    fn drop(&mut self) { DISPLAY_DEPTH.with(|d| d.set(d.get().saturating_sub(1))); }
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -208,6 +251,15 @@ impl std::fmt::Display for Value {
             Value::String(s)   => write!(f, "\"{}\"", s),
             Value::Symbol(s)   => write!(f, "{}", s),
             Value::List(vs) => {
+                // Nested lists recurse here on the native stack; cap the depth
+                // so a pathological structure elides instead of overflowing
+                // (a Rust stack overflow aborts and can't be caught). Mirrors
+                // interp::print_repr's guard.
+                if DISPLAY_DEPTH.with(|d| d.get()) >= MAX_DISPLAY_DEPTH {
+                    return write!(f, "(...)");
+                }
+                DISPLAY_DEPTH.with(|d| d.set(d.get() + 1));
+                let _dec = DisplayDepthGuard;
                 write!(f, "(")?;
                 for (i, v) in vs.iter().enumerate() {
                     if i > 0 { write!(f, " ")?; }

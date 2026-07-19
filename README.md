@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.60.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.61.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -737,6 +737,22 @@ Rusty implements TCO via an explicit trampoline loop — stack-safe recursion to
 
 (sum-to 1000000 0)   ; no stack overflow
 ```
+
+**Non-tail recursion** still uses the native stack, so it is bounded — but it is
+*guarded*, never a crash. Since 0.61.0 the evaluator sizes its recursion guard
+from the thread's stack (`ulimit -s`) and raises a clean `recursion limit
+exceeded` error before the stack overflows, instead of aborting the process. So
+how deep non-tail recursion may go is tunable the unix way:
+
+```bash
+# deep.lisp: (define (f n) (if (= n 0) 0 (+ 1 (f (- n 1))))) (print (f 20000))
+ulimit -s 8192   && rusty deep.lisp   # → Error: recursion limit exceeded (native stack ~7 MB) …
+ulimit -s 131072 && rusty deep.lisp   # → 20000
+```
+
+The honest guidance is still to use an accumulator / tail call (unbounded via
+TCO). Deeply nested *source* and printing of deeply nested values are likewise
+refused/elided rather than crashing. See `benchmarks/stress_crash_probe.sh`.
 
 ---
 

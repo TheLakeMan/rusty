@@ -104,10 +104,127 @@ struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
-pub struct Evaluator;
+// ── Evaluator recursion guard (robustness) ──────────────────────────────────
+// The Rc-based core recurses on the *native* stack for every non-tail
+// sub-evaluation (the trampoline gives TCO only to tail positions). A stack
+// overflow in Rust ABORTS the process (it can't be caught with catch_unwind),
+// so unbounded non-tail recursion — `(sum 100000)`, a deeply nested call
+// expression, a non-tail stdlib fn like `take` — used to core-dump instead of
+// raising. The guard measures the *live native stack* directly: it captures the
+// thread's stack top once and, on each compound eval, compares the address of a
+// local against it, erroring past a threshold set below the thread's stack size.
+//
+// This beats a frame counter two ways: it's O(1) with no per-call
+// increment/decrement or RAII cleanup (the hot path just reads one field and
+// takes a local's address), and it accounts for *nested* Evaluator instances —
+// builtins like `eval-string`/`check-exhaustive` create fresh evaluators that
+// share this same real stack, so a per-instance counter would each get a fresh
+// budget and could still overflow; a stack measurement cannot be fooled.
+//
+// Every entry point runs eval on a large stack (main.rs / lsp_main.rs / the
+// PyO3 wrapper). The guard threshold is that stack's size minus a reserve to
+// unwind the error out; it stays far beyond any real program (tail recursion is
+// unbounded via TCO). Assumes the stack grows downward (true on every supported
+// target).
+
+/// Fraction of the stack reserved below the guard threshold so the error can
+/// unwind without itself overflowing. Unwinding only *pops* frames, so a few MB
+/// is ample; scaling with stack size keeps small (constrained-hardware) stacks
+/// usable while giving big ones a wide margin.
+/// Guard used when no entry point set one (e.g. an embedding that calls eval on
+/// its own thread): safe for a default ~8 MB OS thread stack.
+const DEFAULT_STACK_GUARD: usize = 6 * 1024 * 1024;
+/// Interpreter thread stack size when `RUSTY_STACK_MB` is unset. Sized for deep
+/// (but bounded) recursion; overridable down for constrained hardware.
+#[allow(dead_code)] // used by the PyO3 lib target, not the bins
+pub const DEFAULT_INTERP_STACK_MB: usize = 256;
+
+thread_local! {
+    // The thread's stack top, captured at the first Evaluator::new() on the
+    // thread and shared by every evaluator after (so nested ones measure
+    // against the true top, not their own deeper construction point). 0 = unset.
+    static THREAD_STACK_BASE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    // Bytes of stack the guard allows before erroring; set by the entry point
+    // to match the thread it spawned. See set_interp_stack.
+    static STACK_GUARD_BYTES: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(DEFAULT_STACK_GUARD) };
+}
+
+/// Stack size (bytes) for a *spawned* interpreter thread (the PyO3 bridge, which
+/// can't use the caller's stack): `RUSTY_STACK_MB` if set and sane, else the
+/// default.
+#[allow(dead_code)] // used by the PyO3 lib target, not the bins
+pub fn interp_stack_bytes() -> usize {
+    std::env::var("RUSTY_STACK_MB").ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .map(|mb| mb.clamp(8, 8192))
+        .unwrap_or(DEFAULT_INTERP_STACK_MB)
+        * 1024 * 1024
+}
+
+/// The current thread's usable stack size, for the CLI/LSP which run the
+/// interpreter on their own (main) thread rather than spawning one. On Linux the
+/// main-thread stack grows on demand up to `RLIMIT_STACK`, so `ulimit -s` is the
+/// natural knob for how deep recursion may go; we read the soft limit from
+/// `/proc/self/limits`. Falls back to 8 MB (the usual default) if unreadable or
+/// "unlimited", and caps at 1 GB so an `unlimited` ulimit still yields a finite
+/// guard.
+#[allow(dead_code)] // used by the CLI/LSP binaries, not the lib target
+pub fn native_stack_limit_bytes() -> usize {
+    const FALLBACK: usize = 8 * 1024 * 1024;
+    const CAP: usize = 1024 * 1024 * 1024;
+    let parsed = std::fs::read_to_string("/proc/self/limits").ok().and_then(|s| {
+        s.lines().find(|l| l.starts_with("Max stack size")).and_then(|l| {
+            // "Max stack size   <soft>   <hard>   bytes"
+            l.split_whitespace().nth(3).and_then(|v| v.parse::<usize>().ok())
+        })
+    });
+    parsed.unwrap_or(FALLBACK).min(CAP)
+}
+
+/// Called at the top of a freshly-spawned interpreter thread (before any
+/// Evaluator::new()) to set the recursion guard to that thread's stack size.
+pub fn set_interp_stack(stack_bytes: usize) {
+    let reserve = (stack_bytes / 16).max(1024 * 1024);
+    let guard = stack_bytes.saturating_sub(reserve).max(1024 * 1024);
+    STACK_GUARD_BYTES.with(|g| g.set(guard));
+}
+
+#[inline(always)]
+fn stack_ptr() -> usize {
+    let probe = 0u8;
+    std::hint::black_box(&probe) as *const u8 as usize
+}
+
+pub struct Evaluator {
+    // Cached at construction so the hot path never touches a thread-local.
+    stack_base: usize,
+    stack_guard: usize,
+}
 
 impl Evaluator {
-    pub fn new() -> Self { Evaluator }
+    pub fn new() -> Self {
+        let base = THREAD_STACK_BASE.with(|b| {
+            let cur = b.get();
+            if cur != 0 { return cur; }        // inherit the thread's top
+            let sp = stack_ptr();
+            b.set(sp);
+            sp
+        });
+        let stack_guard = STACK_GUARD_BYTES.with(|g| g.get());
+        Evaluator { stack_base: base, stack_guard }
+    }
+
+    #[inline(always)]
+    fn stack_check(&self) -> Result<(), String> {
+        if self.stack_base.wrapping_sub(stack_ptr()) > self.stack_guard {
+            return Err(format!(
+                "recursion limit exceeded (native stack ~{} MB): non-tail \
+                 recursion too deep — rewrite with an accumulator / tail call",
+                self.stack_guard >> 20));
+        }
+        Ok(())
+    }
 
     // One tokio runtime for every LLM call — building a fresh runtime per
     // call (the old behavior) spins up and tears down a thread pool each
@@ -216,6 +333,12 @@ impl Evaluator {
             }
             _ => {}
         }
+        // Only compound forms reach here (leaves returned above without
+        // recursing), so the hot atom path never touches the guard. Every
+        // non-tail sub-evaluation below re-enters `eval`, deepening this
+        // count by one native frame; `continue` (tail positions) stays in the
+        // same frame and does not.
+        self.stack_check()?;
         let mut cur = expr.clone();
         let mut env = env.clone();
 

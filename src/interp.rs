@@ -101,11 +101,25 @@ pub fn format_number(n: f64) -> String {
     else { format!("{}", n) }
 }
 
+// Rendering a value recurses through nested lists on the native stack; a
+// pathologically deep structure would overflow (an unrecoverable Rust abort).
+// Cap the nesting so it elides to `(...)` instead of core-dumping — a fixed cap
+// safe on the smallest stack we run on (the ~8 MB main thread), well past any
+// readable output.
+const MAX_REPR_DEPTH: usize = 4_000;
+thread_local! {
+    static REPR_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn print_repr(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::List(xs) => {
+            let n = REPR_DEPTH.with(|d| d.get());
+            if n >= MAX_REPR_DEPTH { return "(...)".to_string(); }
+            REPR_DEPTH.with(|d| d.set(n + 1));
             let inner: Vec<String> = xs.iter().map(print_repr).collect();
+            REPR_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
             format!("({})", inner.join(" "))
         }
         other => format!("{}", other),

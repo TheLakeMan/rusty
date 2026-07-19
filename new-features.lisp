@@ -254,3 +254,16 @@
                'lx-effects (check-effects (lambda (p) (file-read p))))) (newline)
 (define (lx-f14 max) (+ max 1))
 (display (list 'lx-shadow-builtin (lx-f14 9))) (newline)
+
+;; Robustness (0.61.0): recursion/parser/display/drop guards refuse cleanly,
+;; never core-dump (a Rust stack overflow aborts and can't be caught). See
+;; benchmarks/stress_crash_probe.sh for the abort-boundary reproductions.
+(define (rb-nontail n) (if (= n 0) 0 (+ 1 (rb-nontail (- n 1)))))
+(define (rb-nest n x) (if (= n 0) x (rb-nest (- n 1) (list x))))
+(define rb-deep-src (string-append (string-repeat "(car " 9000) "'(1)" (string-repeat ")" 9000)))
+(rb-nest 300000 1)   ; built + dropped mid-program: iterative drop, no overflow
+(display (list 'rb-recursion (try-catch (begin (rb-nontail 10000000) 'no-error)
+                                        (e) (if (string-contains? e "recursion limit") 'refused 'other))
+               'rb-nesting (try-catch (begin (eval-string rb-deep-src) 'no-error)
+                                      (e) (if (string-contains? e "nesting too deep") 'refused 'other))
+               'rb-drop 'ok)) (newline)

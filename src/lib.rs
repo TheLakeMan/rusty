@@ -35,6 +35,24 @@ mod kg;
 use eval::Evaluator;
 use interp::{make_env, run_code, print_repr};
 
+/// Run `f` on a worker thread with a large stack and return its result. The
+/// interpreter recurses on the native stack for non-tail eval / recursive
+/// parsing / value display, and its guard is calibrated for this stack size
+/// (see src/main.rs and eval.rs). The Rc-based env is built *inside* `f`, so
+/// nothing non-Send crosses the boundary; a scoped thread lets `f` borrow the
+/// caller's `code`/history.
+fn on_big_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+    let stack = eval::interp_stack_bytes();
+    std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .stack_size(stack)
+            .spawn_scoped(s, || { eval::set_interp_stack(stack); f() })
+            .expect("failed to spawn interpreter thread")
+            .join()
+            .expect("interpreter thread panicked")
+    })
+}
+
 // ── Stateless interpreter ─────────────────────────────────────────────────
 
 /// Stateless Rusty interpreter. Each eval() call gets a fresh environment.
@@ -49,31 +67,31 @@ impl RustyInterp {
 
     /// Evaluate Rusty/Lisp code. Returns result as string (unquoted).
     fn eval(&self, code: &str) -> PyResult<String> {
-        let env = make_env();
-        match run_code(code, &env, &Evaluator::new()) {
-            Ok(v)  => Ok(print_repr(&v)),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e)),
-        }
+        on_big_stack(|| {
+            let env = make_env();
+            run_code(code, &env, &Evaluator::new()).map(|v| print_repr(&v))
+        }).map_err(pyo3::exceptions::PyRuntimeError::new_err)
     }
 
     /// Evaluate and return the Lisp display form (strings stay quoted).
     fn eval_repr(&self, code: &str) -> PyResult<String> {
-        let env = make_env();
-        match run_code(code, &env, &Evaluator::new()) {
-            Ok(v)  => Ok(format!("{}", v)),
-            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e)),
-        }
+        on_big_stack(|| {
+            let env = make_env();
+            run_code(code, &env, &Evaluator::new()).map(|v| format!("{}", v))
+        }).map_err(pyo3::exceptions::PyRuntimeError::new_err)
     }
 
     /// Returns True if the code is syntactically valid.
     fn check(&self, code: &str) -> bool {
-        let tokens = lexer::Lexer::new(code).tokenize();
-        // It says "syntactically valid", so it has to mean it: unbalanced
-        // parens used to pass here.
-        match parser::Parser::new(tokens).parse_checked() {
-            Ok(ast) => !ast.is_empty(),
-            Err(_) => false,
-        }
+        on_big_stack(|| {
+            let tokens = lexer::Lexer::new(code).tokenize();
+            // It says "syntactically valid", so it has to mean it: unbalanced
+            // parens used to pass here.
+            match parser::Parser::new(tokens).parse_checked() {
+                Ok(ast) => !ast.is_empty(),
+                Err(_) => false,
+            }
+        })
     }
 
     fn __repr__(&self) -> &str { "<Rusty interpreter>" }
@@ -95,16 +113,17 @@ impl RustySession {
 
     /// Eval code, preserving all previous definitions.
     fn eval(&mut self, code: &str) -> PyResult<String> {
-        let env  = make_env();
-        let eval = Evaluator::new();
-        for prev in &self.history {
-            let _ = run_code(prev, &env, &eval);
-        }
-        match run_code(code, &env, &eval) {
-            Ok(v) => {
-                self.history.push(code.to_string());
-                Ok(print_repr(&v))
+        let history = &self.history;
+        let result = on_big_stack(|| {
+            let env  = make_env();
+            let eval = Evaluator::new();
+            for prev in history {
+                let _ = run_code(prev, &env, &eval);
             }
+            run_code(code, &env, &eval).map(|v| print_repr(&v))
+        });
+        match result {
+            Ok(s)  => { self.history.push(code.to_string()); Ok(s) }
             Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e)),
         }
     }
@@ -134,9 +153,8 @@ fn rusty(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyfunction]
 #[pyo3(name = "eval")]
 fn eval_fn(code: &str) -> PyResult<String> {
-    let env = make_env();
-    match run_code(code, &env, &Evaluator::new()) {
-        Ok(v)  => Ok(print_repr(&v)),
-        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e)),
-    }
+    on_big_stack(|| {
+        let env = make_env();
+        run_code(code, &env, &Evaluator::new()).map(|v| print_repr(&v))
+    }).map_err(pyo3::exceptions::PyRuntimeError::new_err)
 }

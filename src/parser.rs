@@ -36,10 +36,22 @@ pub struct Parser {
     pos: usize,
     /// First structural complaint found, if any. See `parse_checked`.
     err: Option<String>,
+    /// Native recursion depth of `parse_expr` — nesting of parens/quotes. The
+    /// parser is recursive descent and would overflow the native stack (an
+    /// unrecoverable Rust abort) on deeply nested input; this caps it so a
+    /// hostile/corrupt file is *refused* like a truncated one, not core-dumped.
+    depth: usize,
 }
 
+/// Nesting depth past which parsing is refused. Unlike deep *recursion* (a real
+/// use case, guarded stack-adaptively in eval), deeply nested *source* is never
+/// legitimate, so a fixed cap safe on the smallest stack we run on (the ~8 MB
+/// main thread, whose recursive-descent cliff is ~20k+) is right: 8k refuses
+/// hostile/corrupt input cleanly without ever approaching a real file's nesting.
+const MAX_PARSE_DEPTH: usize = 8_000;
+
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self { Parser { tokens, pos: 0, err: None } }
+    pub fn new(tokens: Vec<Token>) -> Self { Parser { tokens, pos: 0, err: None, depth: 0 } }
 
     fn peek(&self) -> &Token { self.tokens.get(self.pos).unwrap_or(&Token::EOF) }
 
@@ -74,7 +86,27 @@ impl Parser {
         }
     }
 
+    /// Depth-guarded entry to the recursive descent. On overflow it records the
+    /// error and consumes the rest of the input so every open `(` loop and the
+    /// top-level `parse` loop hit EOF and unwind — `parse_checked` then surfaces
+    /// the error instead of the parser overflowing the native stack.
     fn parse_expr(&mut self) -> Option<Expr> {
+        self.depth += 1;
+        if self.depth > MAX_PARSE_DEPTH {
+            if self.err.is_none() {
+                self.err = Some(format!(
+                    "nesting too deep (over {} levels) — refusing to parse", MAX_PARSE_DEPTH));
+            }
+            self.pos = self.tokens.len();   // force EOF everywhere → all loops terminate
+            self.depth -= 1;
+            return None;
+        }
+        let r = self.parse_expr_inner();
+        self.depth -= 1;
+        r
+    }
+
+    fn parse_expr_inner(&mut self) -> Option<Expr> {
         match self.peek().clone() {
             Token::EOF => { self.advance(); None }
             // A ')' with nothing open. parse() stops here, which would discard

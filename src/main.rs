@@ -34,6 +34,19 @@ fn dump_coverage() {
 }
 
 fn main() {
+    // The Rc-based core recurses on the native stack for non-tail eval,
+    // recursive parsing, and value display; without a guard, deep enough input
+    // *aborts* the process (a Rust stack overflow can't be caught). We run on
+    // the main thread (its stack grows on demand up to `ulimit -s`, and staying
+    // off a spawned thread avoids that thread's slower TLS on the eval hot path)
+    // and size the recursion guard to that limit — so anything past the stack
+    // budget becomes a clean raised error, never a core dump. `ulimit -s` is the
+    // knob for how deep recursion may go.
+    eval::set_interp_stack(eval::native_stack_limit_bytes());
+    run_cli();
+}
+
+fn run_cli() {
     let global = make_env();
     let eval   = Evaluator::new();
 

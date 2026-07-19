@@ -135,6 +135,13 @@ fn word_at(text: &str, line: u32, character: u32) -> Option<String> {
 }
 
 fn main() {
+    // Run on the main thread with the recursion guard sized to `ulimit -s`,
+    // like the CLI (see src/main.rs).
+    eval::set_interp_stack(eval::native_stack_limit_bytes());
+    run_lsp();
+}
+
+fn run_lsp() {
     // A real interpreter env: its root frame is the completion universe.
     let genv = interp::make_env();
     interp::load_stdlib(&genv, &eval::Evaluator::new());
