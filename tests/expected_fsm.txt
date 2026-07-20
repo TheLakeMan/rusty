@@ -1,0 +1,11 @@
+(deterministic #t step-interlock (open off))
+(reachable ((closed off) (closed on) (open off)))
+(reaches-open-off #t reaches-bad #f)
+(inductive verified)
+(bad-unreachable verified)
+(fsm-safety-report inductive verified bad-unreachable verified reachable-count 3 domain-size 16)
+(proved microwave-interlock)
+(buggy-inductive-rejected #t inductive-witness (((closed on) open-door) false))
+(buggy-bad-reachable ((open on)))
+(nondeterministic-detected #t safe-oven-complete #f)
+FSM TESTS DONE
