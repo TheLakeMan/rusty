@@ -377,7 +377,11 @@
                 (if (equal? result 'verified)
                     'verified
                     (list (list 'counterexamples result))))
-              'verified)))))
+              ;; No domains or no invariant = NO dynamic check ran, and
+              ;; "verified" must never certify absence of work — refuse
+              ;; with a reason a proposer loop can act on. Static-only
+              ;; callers should invoke check-effects/check-types directly.
+              (list (list 'unchecked 'missing-domains-or-invariant)))))))
 
 ;; A misbehaving proposer (LLM replying with prose, markdown fences, a
 ;; define instead of a lambda, unparseable text...) must cost one attempt

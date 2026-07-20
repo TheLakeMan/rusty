@@ -555,7 +555,10 @@ pub fn setup_builtins(env: &Env) {
     b!(">",  |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a>b))  });
     b!("<=", |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a<=b)) });
     b!(">=", |args| { let (a,b)=num2(args)?; Ok(Value::Bool(a>=b)) });
-    b!("not",|args| Ok(Value::Bool(matches!(args.first(), Some(Value::Bool(false))|Some(Value::Nil)|None))));
+    // SPEC §3: #f is the ONLY false value — `not` must agree with `if`
+    // (it used to also treat Nil/missing as false, so `(if nil 1 2)` → 1
+    // but `(not nil)` → #t; aligned 0.62.1).
+    b!("not",|args| { if args.len()!=1 { return Err("not: 1 arg".into()); } Ok(Value::Bool(matches!(args[0], Value::Bool(false)))) });
     b!("eq?",    |args| { if args.len()!=2{return Err("eq?: 2 args".into());} Ok(Value::Bool(value_equal(&args[0],&args[1]))) });
     b!("equal?", |args| { if args.len()!=2{return Err("equal?: 2 args".into());} Ok(Value::Bool(value_equal(&args[0],&args[1]))) });
     b!("zero?",     |args| { if let Some(Value::Number(n))=args.first(){Ok(Value::Bool(*n==0.0))}else{Err("zero?: not a number".into())} });
@@ -1099,7 +1102,8 @@ pub fn setup_builtins(env: &Env) {
         // boundary, the Rc'd Lisp world never leaves this thread, and the
         // .so outlives the scope because the Value holding its Rc<Library>
         // is borrowed for the duration. Convention: result != 0.0 means
-        // the property HOLDS (defrust has no booleans — return 1.0/0.0).
+        // the property HOLDS (defrust has no booleans — return 1.0/0.0);
+        // NaN is refused as out-of-contract (see the loop below).
         // Counterexamples are collected per chunk and merged in chunk
         // order, so output is bit-identical to the serial sweep.
         if let Value::Native { arity, fn_ptr, .. } = property {
@@ -1123,7 +1127,7 @@ pub fn setup_builtins(env: &Env) {
                 None => 1,
             };
             let chunk = total.div_ceil(threads);
-            let mut failures: Vec<Vec<f64>> = Vec::new();
+            let mut failures: Vec<(Vec<f64>, bool)> = Vec::new();
             std::thread::scope(|s| {
                 let mut handles = Vec::new();
                 for t in 0..threads {
@@ -1138,10 +1142,15 @@ pub fn setup_builtins(env: &Env) {
                         let mut rem = lo;
                         for pos in (0..nd).rev() { idx[pos] = rem % doms[pos].len(); rem /= doms[pos].len(); }
                         let mut buf = vec![0f64; nd];
-                        let mut cex = Vec::new();
+                        let mut cex: Vec<(Vec<f64>, bool)> = Vec::new();
                         for _ in lo..hi {
                             for (k, &i) in idx.iter().enumerate() { buf[k] = doms[k][i]; }
-                            if f(buf.as_ptr(), nd) == 0.0 { cex.push(buf.clone()); }
+                            // 0.0 = fails; NaN is neither true nor false —
+                            // out of contract, refused (it used to count as
+                            // HOLDS because NaN != 0.0). Any other nonzero
+                            // (incl. Inf) holds per the 1.0/0.0 convention.
+                            let v = f(buf.as_ptr(), nd);
+                            if v == 0.0 || v.is_nan() { cex.push((buf.clone(), v.is_nan())); }
                             for pos in (0..nd).rev() {
                                 idx[pos] += 1;
                                 if idx[pos] < doms[pos].len() { break; }
@@ -1156,9 +1165,10 @@ pub fn setup_builtins(env: &Env) {
             return if failures.is_empty() {
                 Ok(Value::Symbol("verified".to_string()))
             } else {
-                Ok(list(failures.into_iter().map(|args| list(vec![
+                Ok(list(failures.into_iter().map(|(args, nan)| list(vec![
                     list(args.into_iter().map(Value::Number).collect()),
-                    Value::String("false".to_string()),
+                    Value::String(if nan { "non-boolean: NaN".to_string() }
+                                  else { "false".to_string() }),
                 ])).collect()))
             };
         }
@@ -1169,8 +1179,14 @@ pub fn setup_builtins(env: &Env) {
         for _ in 0..total {
             let combo: Vec<Value> = indices.iter().zip(domains.iter()).map(|(&i, d)| d[i].clone()).collect();
             let reason = match apply_value(property, &combo, &eval) {
-                Ok(v) if matches!(v, Value::Bool(false) | Value::Nil) => Some("false".to_string()),
-                Ok(_) => None,
+                // Boolean-strict (0.62.1): a property must be a boolean
+                // predicate. Under SPEC §3 truthiness, 0/""/symbols are all
+                // truthy — so a mis-written "0 means ok" predicate used to
+                // silently VERIFY. A verification primitive must not guess:
+                // anything but #t/#f is refused as a named counterexample.
+                Ok(Value::Bool(true)) => None,
+                Ok(Value::Bool(false)) => Some("false".to_string()),
+                Ok(v) => Some(format!("non-boolean: {}", print_repr(&v))),
                 Err(e) => Some(e),
             };
             if let Some(r) = reason {

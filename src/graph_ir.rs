@@ -11,8 +11,10 @@
 //! when its condition is constant) and dead-code elimination (mark-and-sweep
 //! from the output, which cleans up whatever folding/pruning orphaned).
 //!
-//! This is an inspectable/executable IR only — no codegen backend yet (see
-//! docs/ROADMAP.md 1.2; wiring it into `rust_jit`'s codegen is future work).
+//! The IR is both interpretable (`eval_graph`) and compilable: `graph-compile`
+//! → `rust_jit::compile_graph` (scalar kernels) and `graph-compile-grad` →
+//! `rust_jit::compile_graph_grad` (fused forward+backward tensor kernels,
+//! static shapes) emit the optimized DAG as straight-line Rust (Phase 3.3).
 
 use crate::env::Value;
 use crate::parser::Expr;

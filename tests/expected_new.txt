@@ -77,3 +77,6 @@ refused
 (lx-grad 6 lx-effects ("file-read: touches the filesystem"))
 (lx-shadow-builtin 10)
 (rb-recursion refused rb-nesting refused rb-drop ok)
+(vh-strict (((1) "non-boolean: 0")) vh-bool verified)
+(vh-unchecked ((unchecked missing-domains-or-invariant)) vh-full verified)
+(vh-not-nil #f vh-not-false #t vh-not-zero #f vh-if-nil then vh-not-arity raised)

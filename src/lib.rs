@@ -100,7 +100,10 @@ impl RustyInterp {
 // ── Stateful session ──────────────────────────────────────────────────────
 
 /// Stateful session. Definitions persist across eval() calls by replaying
-/// history into a fresh env each time (safe, no Rc across threads).
+/// history into a fresh env each time (an Rc-isolation choice, not a
+/// correctness guarantee: side effects replay too, and a form whose replay
+/// FAILS — e.g. a file op that only succeeds once — now surfaces as an
+/// error naming the failing form instead of silently leaving a partial env).
 #[pyclass]
 pub struct RustySession {
     history: Vec<String>,
@@ -117,8 +120,14 @@ impl RustySession {
         let result = on_big_stack(|| {
             let env  = make_env();
             let eval = Evaluator::new();
-            for prev in history {
-                let _ = run_code(prev, &env, &eval);
+            for (i, prev) in history.iter().enumerate() {
+                if let Err(e) = run_code(prev, &env, &eval) {
+                    return Err(format!(
+                        "session history replay failed at form {} ({}): {}",
+                        i + 1,
+                        prev.chars().take(40).collect::<String>(),
+                        e));
+                }
             }
             run_code(code, &env, &eval).map(|v| print_repr(&v))
         });

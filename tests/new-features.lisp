@@ -267,3 +267,17 @@
                'rb-nesting (try-catch (begin (eval-string rb-deep-src) 'no-error)
                                       (e) (if (string-contains? e "nesting too deep") 'refused 'other))
                'rb-drop 'ok)) (newline)
+
+;; Verification honesty (0.62.1, Grok-review fixes): check-exhaustive is
+;; boolean-strict (a truthy non-boolean is a NAMED counterexample, never a
+;; silent verify), verify-candidate refuses a spec with no dynamic gate,
+;; and `not` agrees with `if` (SPEC §3: #f is the ONLY false value).
+(display (list 'vh-strict (check-exhaustive (lambda (x) 0) (list (list 1)))
+               'vh-bool (check-exhaustive (lambda (x) (> x 0)) (list (list 1 2))))) (newline)
+(display (list 'vh-unchecked (verify-candidate (lambda (x) x) (list (list 'pure #t)))
+               'vh-full (verify-candidate (lambda (x) (* x x))
+                          (list (list 'domains (list (list 0 1 2)))
+                                (list 'invariant (lambda (f x) (>= (f x) 0))))))) (newline)
+(display (list 'vh-not-nil (not nil) 'vh-not-false (not #f) 'vh-not-zero (not 0)
+               'vh-if-nil (if nil 'then 'else)
+               'vh-not-arity (try-catch (not) (e) 'raised))) (newline)

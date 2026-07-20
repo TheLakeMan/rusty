@@ -590,9 +590,16 @@ impl Evaluator {
                                                     EnvFrame::set(&child, params[0].clone(),
                                                         Value::String(input.to_string()));
                                                 }
-                                                let last = body.len() - 1;
-                                                for e in &body[..last] { let _ = self.eval(e, &child); }
-                                                match self.eval(&body[last], &child) {
+                                                // Stop at the FIRST failing form (like
+                                                // tool-call's `?`) — an intermediate
+                                                // side-effect error used to be silently
+                                                // dropped, with later forms still running.
+                                                let mut result = Ok(Value::Nil);
+                                                for e in body.iter() {
+                                                    result = self.eval(e, &child);
+                                                    if result.is_err() { break; }
+                                                }
+                                                match result {
                                                     Ok(v) => format!("{}", v),
                                                     Err(e) => format!("Error: {}", e),
                                                 }

@@ -51,7 +51,14 @@ macro builtin tool tensor native native-grad`.
 ## 3. Truthiness
 
 **`#f` is the only false value.** Everything else — including `()`, `0`,
-and `""` — is true. `(if '() 1 2)` ⇒ `1`.
+and `""` — is true. `(if '() 1 2)` ⇒ `1`. `not` follows the same rule:
+`(not x)` is `#t` only for `#f` — in particular `(not nil)` ⇒ `#f`
+(aligned 0.62.1; it used to treat Nil as false, disagreeing with `if`).
+
+`check-exhaustive` is stricter than truthiness on purpose: a property must
+return `#t`/`#f`, and any other value is a named `non-boolean: …`
+counterexample — a verification primitive must not guess what a truthy
+non-boolean meant.
 
 ## 4. Equality
 

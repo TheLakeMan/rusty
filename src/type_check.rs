@@ -10,14 +10,17 @@
 //! and reports any operation it can *prove* runs on a value of the wrong
 //! type. Deliberately conservative: an unresolvable type is `Unknown`, and
 //! `Unknown` is never flagged, so this only ever reports provable mismatches,
-//! never guesses. This is separate from (and doesn't touch) `define-typed`
-//! (std.lisp), which is a runtime contract check, not static analysis.
+//! never guesses. `define-typed` (std.lisp) stays a *runtime* contract
+//! check, but its declared signatures feed this checker: a thread-local
+//! registry (`register_signature`, populated by `define-typed`'s expansion
+//! via the `register-signature` builtin) lets calls to `define-typed`
+//! functions check statically too — declared param types are enforced at
+//! call sites and the declared return type flows onward.
 //!
 //! v1 scope, each a clean extension point rather than a dead end: only
 //! `if`/`let`/`let*` are understood (not `cond`/`when`/`letrec`/named-`let`);
-//! only a single type per variable (no unions); user-defined function calls
-//! always return `Unknown` (no cross-function return-type registry yet, so
-//! `define-typed`'s declared return types aren't consulted here).
+//! only a single type per variable (no unions); calls to plain `define`d
+//! functions (no registered signature) still return `Unknown`.
 
 use crate::parser::Expr;
 use std::collections::HashMap;

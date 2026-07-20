@@ -106,6 +106,13 @@ fn codegen_num(expr: &Expr, ctx: &mut Ctx) -> Result<String, String> {
         Expr::List(items) if !items.is_empty() => {
             if let Some(head) = sym_of(&items[0]) {
                 match head {
+                    // NB `/` divergence (documented, like `mod` below): the
+                    // interpreter's `/` RAISES on a zero divisor; compiled
+                    // `/` is plain Rust f64 → ±Inf (or NaN for 0/0), since
+                    // a compiled body has no error channel. A property
+                    // proven interpreted therefore never hit a zero divisor
+                    // on its domain — the divergence is only reachable
+                    // off-domain.
                     "+" | "-" | "*" | "/" if items.len() >= 2 => {
                         let parts = items[1..].iter()
                             .map(|e| codegen_num(e, ctx))
