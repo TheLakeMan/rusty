@@ -825,6 +825,12 @@ that service's users.
 
 **Commercial licensing** — if the AGPL's terms don't fit your use (for example,
 embedding Rusty in a closed-source product or network service), a commercial
-license is available on inquiry. Contact Nicholas Vermeulen to discuss terms.
+license is available on inquiry. See [COMMERCIAL.md](./COMMERCIAL.md), or contact
+Nicholas Vermeulen at <thelakeman@protonmail.com> to discuss terms.
+
+**Contributing** — Rusty is dual-licensed, so contributions require a short
+license grant that keeps the project relicensable as a whole. See
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the CLA and the technical standards every
+change must meet.
 
 ☯ *In memory of my brother.*
