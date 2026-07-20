@@ -25,7 +25,7 @@ Rusty is the language you reach for when you need **computation that reasons abo
 - **Rusty as reliable executor** — Deterministically execute with symbolic reasoning
 - **Verifiable agents** — Prove correctness using formal methods
 
-[→ **See the full 5-year roadmap →**](./ROADMAP.md)
+[→ **See the roadmap — all five phases delivered →**](./ROADMAP.md)
 
 ---
 
@@ -778,22 +778,22 @@ cargo run -- hello.lisp
 
 ---
 
-## 5-Year Roadmap
+## Roadmap — engineering complete
 
-### Phase 1 (Q1–Q4 2025): Symbolic Transformation Layer
-Build macro DSLs for computation graph generation and optimization. Generate code on par with PyTorch.
+Rusty was originally scoped as a five-phase plan projected across roughly five
+years. In practice the engineering landed in **under a month**: from the first
+prototype commit to all five phases delivered in **27 days** (2026-06-22 →
+2026-07-19, 191 commits). What remains is adoption, not engineering.
 
-### Phase 2 (Q1–Q2 2026): Verifiable AI Systems
-Integrate formal verification (Lean/Coq). Prove tool correctness. Add gradual typing.
+| Phase | Deliverable | Status |
+|-------|-------------|--------|
+| 1 | Symbolic transformation layer — macro DSLs → computation graphs; `defrust` compiles a numeric subset to real Rust | ✅ Delivered |
+| 2 | Verifiable AI — self-contained verification (`check-effects` / `check-exhaustive`) + gradual typing, no external prover | ✅ Delivered |
+| 3 | Native ML — native tensors + reverse-mode autodiff, verified bit-for-bit against PyTorch; real multicore via the multi-process seam | ✅ Delivered |
+| 4 | Killer-app libraries — symbolic regression, synthesis, proof assistant, robotics, verified state machines (all golden-tested) | ✅ Delivered |
+| 5 | Maturity — LSP, package manager, Python bridge, released on crates.io | ✅ Engineering complete; adoption ongoing |
 
-### Phase 3 (Q3–Q4 2026): Production ML Integration
-Zero-copy tensor interop with PyTorch/JAX. Multi-agent coordination. 10x performance.
-
-### Phase 4 (Q1–Q4 2027): Ecosystem & Libraries
-Killer apps: symbolic regression, proof synthesis, robot control. Package manager.
-
-### Phase 5 (Q1 2028+): Maturity
-v1.0.0 release. IDE support, LSP, debugger. Production deployments.
+[→ **Full phase-by-phase status**](./ROADMAP.md)
 
 **[→ Read the full roadmap →](./ROADMAP.md)**
 

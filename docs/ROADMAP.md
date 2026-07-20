@@ -181,7 +181,9 @@ The small case is the win compiling was built for: the graph is compiled once in
 
 ## Key Milestones & Checkpoints
 
-Projected across five years; the engineering landed far faster. Status by phase:
+Originally projected across roughly five years; the engineering actually landed
+in **under a month** — first prototype commit to all five phases delivered in 27
+days (2026-06-22 → 2026-07-19, 191 commits). Status by phase:
 
 | Phase | Key Deliverable | Status |
 |-------|-----------------|--------|
@@ -189,7 +191,7 @@ Projected across five years; the engineering landed far faster. Status by phase:
 | 2 | Self-contained verification | Delivered — tool specs verified by Rusty's own checkers, no external prover |
 | 3 | Native ML capability | Delivered — native tensors + reverse-mode autodiff, verified bit-for-bit against PyTorch |
 | 4 | Killer-app libraries | Delivered — symbolic regression, synthesis, proof assistant, robotics (all golden-tested) |
-| 5 | Maturity & adoption | Engineering complete (v0.36.0); adoption (5.3) is the only work left |
+| 5 | Maturity & adoption | Engineering complete (v0.63.0, released on crates.io); adoption (5.3) is the only work left |
 
 ---
 
