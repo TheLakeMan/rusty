@@ -1,0 +1,12 @@
+(impulse ((1 0) (1 0) (1 0) (1 0)))
+(constant ((4 0) (0 0) (0 0) (0 0)))
+(alternating ((0 0) (0 0) (4 0) (0 0)))
+(fft4 ((9 0) (1 6) (1 0) (1 -6)))
+(conv (1 3 2 0))
+(roundtrip-verified verified)
+(parseval-verified verified)
+(parseval-wrong-refuted count 80 first ((-1 -1 -1 -1) false))
+(fft-eq-dft-verified verified)
+(conv-theorem-verified verified)
+(fft8-matches-dft #t)
+SIGNAL TESTS DONE
