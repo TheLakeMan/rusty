@@ -1,0 +1,11 @@
+(oracle-min 18)
+(tour-0213 18)
+(tour-0123 21)
+(oracle-verified verified)
+(oracle-refuted (((#t) false)))
+(sa-seed1-cost 18)
+(sa-ge-oracle #t)
+(sa-replay #t)
+(log-len 40 first-step 0)
+(subset-oracle 0)
+ANNEAL TESTS DONE
