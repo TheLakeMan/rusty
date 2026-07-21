@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.76.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.77.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -72,6 +72,12 @@ cargo run
 # Run a Lisp file
 cargo run -- path/to/script.lisp
 
+# Format a file (canonical, idempotent, semantics-preserving)
+cargo run -- fmt path/to/script.lisp            # to stdout
+cargo run -- fmt path/to/script.lisp --write    # in place
+
+# Editor support (highlighting + rusty-lsp): see editor/README.md
+
 # Python bridge
 maturin develop
 python3 -c "import rusty; print(rusty.eval('(+ 1 2)'))"
@@ -110,7 +116,8 @@ Three binaries wrap one core — no interpreter logic lives in an entry point:
 | `src/checkpoint.rs` | `(checkpoint "f.lisp")` — the global env serialized as plain Lisp source; restore is just `load` |
 | `src/trace.rs` | Off-by-default execution tracing — tool/LLM/agent events as pure data |
 | `src/main.rs` | CLI + REPL (input-completeness scanner, `/name` help sugar) |
-| `src/lsp_main.rs` | `rusty-lsp` — a minimal stdio language server: positioned diagnostics, completion harvested from a live env, hover |
+| `src/lsp_main.rs` | `rusty-lsp` — a stdio language server: positioned diagnostics, completion harvested from a live env, hover, top-level symbol outline, and document formatting |
+| `src/fmt.rs` | Canonical source formatter (`rusty fmt`, `fmt-string`, the LSP formatter) — a re-indenter/spacing-normalizer that is idempotent and semantics-preserving by construction (preserves comments/strings/line breaks) |
 | `src/lib.rs` | Python bindings via PyO3 — `rusty.eval()`, `Rusty`, `RustySession` |
 | `src/llm.rs` | Vestigial — not compiled in; the live LLM client sits in `eval.rs` |
 

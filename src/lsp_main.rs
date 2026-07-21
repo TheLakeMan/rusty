@@ -32,6 +32,7 @@ mod trace;
 mod type_check;
 mod effect_check;
 mod kg;
+mod fmt;
 
 use serde_json::{json, Value as J};
 use std::collections::HashMap;
@@ -108,6 +109,72 @@ fn scan_diagnostics(text: &str) -> Vec<(u32, u32, String)> {
     diags
 }
 
+/// Top-level definitions in a document, for the outline (documentSymbol).
+/// A positional scan: at depth 0, `(<def-form> <name> ...)` or
+/// `(<def-form> (<name> args...) ...)` yields (name, keyword, line, col_start,
+/// col_end). Strings and comments are skipped so a `;` or `"` can't fool it.
+fn document_symbols(text: &str) -> Vec<(String, String, u32, u32, u32)> {
+    let chars: Vec<char> = text.chars().collect();
+    let (mut line, mut col) = (0u32, 0u32);
+    let mut i = 0;
+    let mut depth: i32 = 0;
+    // expecting: 0 none, 1 head (just entered a top-level form), 2 name,
+    // 3 name-inside-a-list
+    let mut expecting = 0u8;
+    let mut kw = String::new();
+    let mut out = Vec::new();
+    let is_def = |s: &str| matches!(s,
+        "define" | "def" | "define-macro" | "defmacro" | "deftool" | "deftool-spec"
+        | "defrust" | "defrust*" | "defun-constrained" | "define-typed" | "defproof"
+        | "deftest" | "defguard");
+    while i < chars.len() {
+        let c = chars[i];
+        match c {
+            '\n' => { line += 1; col = 0; i += 1; }
+            ' ' | '\t' | '\r' => { col += 1; i += 1; }
+            ';' => { while i < chars.len() && chars[i] != '\n' { i += 1; col += 1; } }
+            '"' => {
+                i += 1; col += 1;
+                while i < chars.len() {
+                    match chars[i] {
+                        '\\' => { i += 2; col += 2; }
+                        '"'  => { i += 1; col += 1; break; }
+                        '\n' => { line += 1; col = 0; i += 1; }
+                        _    => { i += 1; col += 1; }
+                    }
+                }
+            }
+            '(' | '[' => {
+                if depth == 0 { expecting = 1; }
+                depth += 1; col += 1; i += 1;
+            }
+            ')' | ']' => { depth -= 1; col += 1; i += 1; if depth == 0 { expecting = 0; } }
+            '\'' | '`' | ',' => { col += 1; i += 1; }
+            _ => {
+                let (sl, sc) = (line, col);
+                let start = i;
+                while i < chars.len()
+                    && !matches!(chars[i], ' '|'\t'|'\r'|'\n'|'('|')'|'['|']'|'"'|';'|'\''|'`'|',') {
+                    i += 1; col += 1;
+                }
+                let word: String = chars[start..i].iter().collect();
+                match expecting {
+                    1 => { if is_def(&word) { kw = word; expecting = 2; } else { expecting = 0; } }
+                    2 | 3 => {
+                        out.push((word.clone(), kw.clone(), sl, sc, sc + (i - start) as u32));
+                        expecting = 0;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // a `(` seen while expecting the name means `(name args...)` — the name
+        // is the first symbol inside it.
+        if expecting == 2 && depth >= 2 { expecting = 3; }
+    }
+    out
+}
+
 fn describe(v: &env::Value) -> String {
     match v {
         env::Value::Builtin(name, _) => format!("builtin `{}`", name),
@@ -158,7 +225,9 @@ fn run_lsp() {
                 "capabilities": {
                     "textDocumentSync": 1,   // full
                     "completionProvider": {},
-                    "hoverProvider": true
+                    "hoverProvider": true,
+                    "documentSymbolProvider": true,
+                    "documentFormattingProvider": true
                 },
                 "serverInfo": {"name": "rusty-lsp", "version": env!("CARGO_PKG_VERSION")}
             })),
@@ -194,6 +263,39 @@ fn run_lsp() {
                     .map(|n| json!({"label": n, "kind": 3}))
                     .collect();
                 reply(&mut stdout, &id, json!(items));
+            }
+            "textDocument/documentSymbol" => {
+                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("");
+                let syms: Vec<J> = docs.get(uri).map(|text| {
+                    document_symbols(text).into_iter().map(|(name, kw, line, cs, ce)| {
+                        let range = json!({"start": {"line": line, "character": cs},
+                                           "end":   {"line": line, "character": ce}});
+                        json!({
+                            "name": name,
+                            "detail": kw,
+                            // 12 = Function; macros/tools still read as callable.
+                            "kind": 12,
+                            "range": range,
+                            "selectionRange": range
+                        })
+                    }).collect()
+                }).unwrap_or_default();
+                reply(&mut stdout, &id, json!(syms));
+            }
+            "textDocument/formatting" => {
+                let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("");
+                let edits: Vec<J> = docs.get(uri).map(|text| {
+                    let formatted = crate::fmt::format(text);
+                    let lines: Vec<&str> = text.split('\n').collect();
+                    let end_line = (lines.len().saturating_sub(1)) as u32;
+                    let end_char = lines.last().map(|l| l.chars().count()).unwrap_or(0) as u32;
+                    vec![json!({
+                        "range": {"start": {"line": 0, "character": 0},
+                                  "end":   {"line": end_line, "character": end_char}},
+                        "newText": formatted
+                    })]
+                }).unwrap_or_default();
+                reply(&mut stdout, &id, json!(edits));
             }
             "textDocument/hover" => {
                 let uri = msg["params"]["textDocument"]["uri"].as_str().unwrap_or("");

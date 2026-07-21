@@ -1,0 +1,21 @@
+── canonical output ──
+;; header
+(define (f x)
+  (if (> x 0)
+      (list (quote pos) x)
+      (list (quote neg) x)))
+
+(define (g lst)
+  (cond ((null? lst) 0)
+        ((> (car lst) 0) (+ 1 (g (cdr lst))))
+        (else (g (cdr lst)))))
+(let ((a 1)
+      (b 2))
+  (+ a b)) ; inline
+
+(idempotent #t)
+(sem-define+call #t)
+(sem-let-cond #t)
+(sem-nested-quote #t)
+(keeps-header #t keeps-inline #t)
+FMT TESTS DONE

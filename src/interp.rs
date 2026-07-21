@@ -1983,6 +1983,17 @@ pub fn setup_builtins(env: &Env) {
             _ => Err("categorize!: second arg must be a list of name symbols".into()),
         }
     });
+    // (fmt-string "source") — canonically format Rusty source text. Pure: a
+    // re-indenter/spacing-normalizer that preserves comments and strings and is
+    // semantics-preserving by construction (see src/fmt.rs). Backs `rusty fmt`
+    // and the LSP formatting provider; exposed as a builtin so goldens can pin
+    // idempotency and behavioral equivalence in-language.
+    b!("fmt-string", |args| {
+        match args.first() {
+            Some(Value::String(src)) => Ok(Value::String(crate::fmt::format(src))),
+            _ => Err("fmt-string: argument must be a string".into()),
+        }
+    });
     // NOTE: no `help` builtin here — std.lisp defines `(help)`/`(help 'cat)`
     // as registry-driven discovery (see std.lisp's "Command discovery"
     // section) and, loading after builtins, shadows any binding of that name

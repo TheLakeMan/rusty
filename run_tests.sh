@@ -58,6 +58,7 @@ run_test "tests/interp-test.lisp"  "tests/expected_interp.txt" "interp-test.lisp
 run_test "tests/signal-test.lisp"  "tests/expected_signal.txt" "signal-test.lisp (exact DFT/FFT identities)"
 run_test "tests/listdsl-test.lisp" "tests/expected_listdsl.txt" "listdsl-test.lisp (fused list-op DSL, proven equivalent)"
 run_test "tests/classify-test.lisp" "tests/expected_classify.txt" "classify-test.lisp (logic-invariant classifier, proven)"
+run_test "tests/fmt-test.lisp"     "tests/expected_fmt.txt"    "fmt-test.lisp (canonical formatter: idempotent + semantics-preserving)"
 run_test "tests/pkg-test.lisp"     "tests/expected_pkg.txt"    "pkg-test.lisp (package manager)"
 run_test "tests/testkit-test.lisp" "tests/expected_testkit.txt" "testkit-test.lisp (testing framework)"
 run_test "tests/evolve-test.lisp"  "tests/expected_evolve.txt"  "evolve-test.lisp (self-optimization with receipts)"
@@ -86,7 +87,7 @@ for f in tests/tests.lisp tests/new-features.lisp tests/hello.lisp swarm.lisp \
          tests/robot-test.lisp tests/pkg-test.lisp tests/testkit-test.lisp \
          tests/kg-test.lisp tests/discover-test.lisp tests/commands-test.lisp \
          tests/proc-test.lisp tests/pcheck-test.lisp tests/evolve-test.lisp \
-         tests/supervisor-test.lisp; do
+         tests/supervisor-test.lisp tests/fmt-test.lisp; do
     RUSTY_COVERAGE=1 "$RUSTY" "$f" >/dev/null 2>&1
 done
 # check runs WITHOUT RUSTY_COVERAGE so it doesn't record itself

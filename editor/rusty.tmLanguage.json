@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Rusty",
+  "scopeName": "source.rusty",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#quote" },
+    { "include": "#constant" },
+    { "include": "#keyword" },
+    { "include": "#number" }
+  ],
+  "repository": {
+    "comment": {
+      "match": ";.*$",
+      "name": "comment.line.semicolon.rusty"
+    },
+    "string": {
+      "name": "string.quoted.double.rusty",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.rusty" }
+      ]
+    },
+    "quote": {
+      "match": "(?:'|`|,@|,)",
+      "name": "keyword.operator.quote.rusty"
+    },
+    "constant": {
+      "match": "(?<![^\\s()\\[\\]])(#t|#f|nil)(?![^\\s()\\[\\]])",
+      "name": "constant.language.rusty"
+    },
+    "number": {
+      "match": "(?<![^\\s()\\[\\]'`,])[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?(?![^\\s()\\[\\]])",
+      "name": "constant.numeric.rusty"
+    },
+    "keyword": {
+      "match": "(?<=[\\s()\\[\\]])(define|def|define-macro|defmacro|deftool|deftool-spec|defrust\\*?|defun-constrained|define-typed|defproof|deftest|defguard|lambda|let\\*?|letrec\\*?|named-let|if|cond|case|match|when|unless|and|or|not|begin|do|dotimes|while|for|for-each|quote|quasiquote|unquote|unquote-splicing|set!|set|eval|eval-when|eval-string|check-exhaustive|check-effects|check-types|checkpoint|load|module|try|catch|error|assert|apply|map|filter|foldl|foldr)(?=[\\s()\\[\\]])",
+      "name": "keyword.control.rusty"
+    }
+  }
+}

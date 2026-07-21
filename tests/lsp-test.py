@@ -4,7 +4,8 @@
 # lsp-test.py — scripted stdio session against rusty-lsp (Phase 5.2).
 # Checks: init handshake, diagnostics with exact positions, completion
 # harvested from a real interpreter env, hover for globals and special
-# forms. Exits 0 and prints LSP-TEST OK on success.
+# forms, documentSymbol outline, and documentFormatting. Exits 0 and prints
+# LSP-TEST OK on success.
 import subprocess, json, sys
 
 def frame(obj):
@@ -19,8 +20,14 @@ reqs = [
         "textDocument":{"uri":"file:///t.lisp"},"position":{"line":0,"character":0}}},
     {"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{
         "textDocument":{"uri":"file:///t.lisp"},"position":{"line":1,"character":3}}},
+    {"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+        "uri":"file:///t2.lisp","text":";; hdr\n(define   (sq x)  (* x x))\n(defmacro m (a) a)\n(define pi 3)\n"}}},
     {"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{
         "textDocument":{"uri":"file:///t.lisp"},"position":{"line":0,"character":2}}},
+    {"jsonrpc":"2.0","id":6,"method":"textDocument/documentSymbol","params":{
+        "textDocument":{"uri":"file:///t2.lisp"}}},
+    {"jsonrpc":"2.0","id":7,"method":"textDocument/formatting","params":{
+        "textDocument":{"uri":"file:///t2.lisp"},"options":{"tabSize":2,"insertSpaces":True}}},
     {"jsonrpc":"2.0","id":5,"method":"shutdown","params":{}},
     {"jsonrpc":"2.0","method":"exit"},
 ]
@@ -47,4 +54,13 @@ labels = {x["label"] for x in comp}
 assert {"map","defrust","graph-grad","agent-spawn","let"} <= labels, sorted(labels)[:10]
 assert "builtin `+`" in hov3["contents"]["value"], hov3
 assert "special form" in hov4["contents"]["value"], hov4
+
+syms = next(m["result"] for m in msgs if m.get("id") == 6)
+by_name = {s["name"]: s for s in syms}
+assert {"sq","m","pi"} <= set(by_name), by_name
+assert by_name["sq"]["detail"] == "define" and by_name["m"]["detail"] == "defmacro", by_name
+assert by_name["sq"]["range"]["start"]["line"] == 1, by_name["sq"]
+fmt = next(m["result"] for m in msgs if m.get("id") == 7)
+assert "(define (sq x) (* x x))" in fmt[0]["newText"], fmt
+assert fmt[0]["range"]["start"] == {"line":0,"character":0}, fmt
 print("LSP-TEST OK")

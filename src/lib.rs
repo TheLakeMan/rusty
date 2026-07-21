@@ -31,6 +31,7 @@ mod trace;
 mod type_check;
 mod effect_check;
 mod kg;
+mod fmt;
 
 use eval::Evaluator;
 use interp::{make_env, run_code, print_repr};

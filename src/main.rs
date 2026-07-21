@@ -15,6 +15,7 @@ mod trace;
 mod type_check;
 mod effect_check;
 mod kg;
+mod fmt;
 
 use env::Value;
 use eval::Evaluator;
@@ -52,6 +53,20 @@ fn run_cli() {
 
     // File mode
     let args: Vec<String> = std::env::args().collect();
+    // `rusty fmt <file> [--write]` — canonical formatter (see src/fmt.rs).
+    if args.len() > 1 && args[1] == "fmt" {
+        let path = args.get(2).unwrap_or_else(|| { eprintln!("usage: rusty fmt <file> [--write]"); std::process::exit(2); });
+        let code = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); std::process::exit(1); });
+        let out = fmt::format(&code);
+        if args.iter().any(|a| a == "--write") {
+            std::fs::write(path, &out)
+                .unwrap_or_else(|e| { eprintln!("Error writing {}: {}", path, e); std::process::exit(1); });
+        } else {
+            print!("{}", out);
+        }
+        return;
+    }
     if args.len() > 1 {
         let code = std::fs::read_to_string(&args[1])
             .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", args[1], e); std::process::exit(1); });

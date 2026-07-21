@@ -1,0 +1,27 @@
+{
+  "name": "rusty-lisp",
+  "displayName": "Rusty (Lisp)",
+  "description": "Syntax highlighting and editor configuration for the Rusty Lisp (github.com/TheLakeMan/rusty).",
+  "version": "0.1.0",
+  "publisher": "thelakeman",
+  "license": "AGPL-3.0-or-later",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "rusty",
+        "aliases": ["Rusty", "rusty-lisp"],
+        "extensions": [".lisp"],
+        "configuration": "../language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "rusty",
+        "scopeName": "source.rusty",
+        "path": "../rusty.tmLanguage.json"
+      }
+    ]
+  }
+}
