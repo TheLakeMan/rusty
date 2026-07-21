@@ -81,29 +81,58 @@ python3 -c "import rusty; print(rusty.eval('(+ 1 2)'))"
 
 ## Architecture
 
+Three binaries wrap one core — no interpreter logic lives in an entry point:
+
 ```
-Source (.lisp) or REPL input
-    ↓  src/lexer.rs       — tokenizer
-    ↓  src/parser.rs      — S-expression parser  
-    ↓  src/eval.rs        — evaluator, TCO loop, special forms, LLM + tool builtins
-    ↓  src/env.rs         — lexical environments, closures
-    ↓  src/interp.rs      — builtins, stdlib loader, shared core
-    ↓  src/lib.rs         — PyO3 Python bindings
-    ↓  src/main.rs        — REPL, file runner
+   src/main.rs       CLI / REPL          src/lsp_main.rs   rusty-lsp server
+   src/lib.rs        PyO3 Python module
+        ↓
+   src/lexer.rs  →  src/parser.rs  →  src/eval.rs  ⇄  src/interp.rs  →  src/env.rs
+   tokenizer        S-expressions      evaluator       builtins          values & scopes
 ```
 
-### Key Files
+### Full source map
 
 | File | Purpose |
 |------|---------|
-| `src/eval.rs` | Evaluator — TCO loop, special forms, `deftool`, `react-loop`, `llm` |
-| `src/interp.rs` | 60+ builtins, stdlib loader, JSON, shell, format |
-| `src/env.rs` | Environment frames — `Value` enum including `Tool`, `Lambda`, `Macro` |
-| `src/lib.rs` | Python bindings via PyO3 — `Rusty`, `RustySession`, `rusty.eval()` |
-| `agent-tools.lisp` | 10 filesystem + shell + LLM tools, ReAct entry point (auto-loaded) |
-| `std.lisp` | Standard library — 230+ lines of Lisp utilities |
+| `src/lexer.rs` | Tokenizer (numbers incl. scientific notation, strings, symbols) |
+| `src/parser.rs` | S-expression parser. Deliberately lenient core for REPL/LSP; every path that *runs* code goes through strict `parse_checked`, so truncated source refuses to load instead of silently swallowing its tail |
+| `src/eval.rs` | The evaluator — one trampoline loop (TCO to arbitrary depth), special forms, macros with definition-time hygiene, the LLM client, the native-stack recursion guard |
+| `src/env.rs` | `Value` and environments — O(1) list clone/`cdr`/`cons`, native tensors, pooled hybrid frames |
+| `src/interp.rs` | Builtins (~370 registered names), embedded stdlib loader, persistent `remember`/`recall` memory, the `proc-eval`/`proc-pmap` multi-process seam |
+| `src/resolve.rs` | Lexical addressing — variable references resolved at closure creation, with dynamic soundness fallbacks |
+| `src/arena.rs` | Pooled environment-frame maps (allocation reuse on the call hot path) |
+| `src/type_check.rs` | `check-types` — flow-sensitive static type checking; narrows on predicates, only reports what it can prove |
+| `src/effect_check.rs` | `check-effects` — static effect honesty; the gate wuwei and `pkg-effects` build on |
+| `src/rust_jit.rs` | `defrust`/`defrust*` — restricted numeric subset → real Rust → `rustc` → cached `.so`; also emits fused Graph-IR kernels |
+| `src/graph_ir.rs` | Computation DAG — hash-consed CSE, constant folding, DCE, reverse-mode autodiff, static shape inference |
+| `src/kg.rs` | Knowledge graph — indexed triple store, conjunctive `kg-query`, N-Triples interop |
+| `src/checkpoint.rs` | `(checkpoint "f.lisp")` — the global env serialized as plain Lisp source; restore is just `load` |
+| `src/trace.rs` | Off-by-default execution tracing — tool/LLM/agent events as pure data |
+| `src/main.rs` | CLI + REPL (input-completeness scanner, `/name` help sugar) |
+| `src/lsp_main.rs` | `rusty-lsp` — a minimal stdio language server: positioned diagnostics, completion harvested from a live env, hover |
+| `src/lib.rs` | Python bindings via PyO3 — `rusty.eval()`, `Rusty`, `RustySession` |
+| `src/llm.rs` | Vestigial — not compiled in; the live LLM client sits in `eval.rs` |
 
 [→ **Deep dive: Full architecture guide →**](./ARCHITECTURE.md)
+
+### The Lisp layer
+
+`std.lisp` (standard library), `agent-tools.lisp` (agent tools), and `pkg.lisp`
+(the package manager) are embedded in the binary and auto-loaded — a stock
+`rusty` has all three with no setup. The rest of the repo's root `.lisp` files
+are load-by-name libraries, **every one pinned by a golden test**:
+
+| Family | Libraries |
+|--------|-----------|
+| Synthesis & proof | `symreg` (genetic programming), `synth` (sketch/CEGIS synthesis), `prover` (bounded proof assistant), `evolve` (self-optimization with receipts), `testkit` (test registry + assertions) |
+| Agents & systems | `swarm` (verified synthesis via messages alone), `supervisor` (certified supervision trees), `proc` (replay-verified child processes), `pcheck` (parallel exhaustive checking), `kg` (forward-chaining inference rules) |
+| Verified state & control | `robot` (inductive controller safety), `fsm` (invariant + reachability proofs over declared machines) |
+| Verified numerics | `pbt` (property testing with shrinking + sample→exhaust upgrade), `csp` (unsat as exhaustive proof), `units` (dimensional-consistency gate), `ode` (integrators with proven trajectory invariants), `root` (root-finding certificates), `stats` (exact permutation tests), `parse` (combinators + language-equivalence checks), `anneal` (seeded SA vs exhaustive oracles), `linalg` (LU with exact-grid proofs), `simplex` (LP vs brute vertex enumeration), `interp` (interpolation with error envelopes), `signal` (DFT/FFT with exact identities) |
+
+The shared discipline across all of them: every claim is proven on a **declared
+finite domain** (`check-exhaustive` — ran everywhere, never sampled) or refused
+with a concrete witness. "Verified" always means *that*, never "safe in general".
 
 ---
 
@@ -768,12 +797,15 @@ refused/elided rather than crashing. See `benchmarks/stress_crash_probe.sh`.
 
 ## Testing
 
+Golden-file suite: every check runs a `.lisp` driver and diffs its output
+against a checked-in `tests/expected_*.txt` — **32 checks**, including one
+golden per library above, an LSP protocol test, and a coverage ratchet (a
+registered command with no test fails the suite).
+
 ```bash
 ./run_tests.sh
-# or individually:
-cargo run -- tests.lisp
-cargo run -- new-features.lisp
-cargo run -- hello.lisp
+# or a single golden by hand (from the repo root):
+cargo run --release -- tests/tests.lisp | diff - tests/expected_tests.txt
 ```
 
 ---
@@ -803,11 +835,13 @@ prototype commit to all five phases delivered in **27 days** (2026-06-22 →
 
 Rusty welcomes contributions! Areas of interest:
 
-- **Performance optimization** — Reduce cloning, implement copy-on-write
-- **Macro system** — New examples, DSL patterns
-- **Python bridge** — More bindings, better interop
-- **Documentation** — Tutorials, examples, API docs
-- **Tests** — Coverage, edge cases, property-based testing
+- **Libraries** — new verified, golden-tested libraries in the spirit of the
+  shelf above (claim narrow, prove on declared domains)
+- **Macro system** — new examples, DSL patterns
+- **Python bridge** — more bindings, better interop
+- **Documentation** — tutorials, examples, API docs
+- **Tests** — coverage, edge cases (the suite is golden-file based; every
+  change ships with a driver + expected output)
 
 See [ROADMAP.md](./ROADMAP.md) for planned features and [ARCHITECTURE.md](./ARCHITECTURE.md) for deep-dive technical design.
 
