@@ -49,6 +49,7 @@ run_test "tests/csp-test.lisp"     "tests/expected_csp.txt"    "csp-test.lisp (c
 run_test "tests/units-test.lisp"   "tests/expected_units.txt"  "units-test.lisp (dimensional analysis)"
 run_test "tests/ode-test.lisp"     "tests/expected_ode.txt"    "ode-test.lisp (verified ODE integration)"
 run_test "tests/root-test.lisp"    "tests/expected_root.txt"   "root-test.lisp (root finding with certificates)"
+run_test "tests/stats-test.lisp"   "tests/expected_stats.txt"  "stats-test.lisp (exact perm tests + seeded bootstrap)"
 run_test "tests/pkg-test.lisp"     "tests/expected_pkg.txt"    "pkg-test.lisp (package manager)"
 run_test "tests/testkit-test.lisp" "tests/expected_testkit.txt" "testkit-test.lisp (testing framework)"
 run_test "tests/evolve-test.lisp"  "tests/expected_evolve.txt"  "evolve-test.lisp (self-optimization with receipts)"

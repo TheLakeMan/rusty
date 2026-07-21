@@ -1,0 +1,12 @@
+(mean 2.5)
+(var 1.25)
+(sum 10)
+(perm-eq-means 24 24 1 0)
+(perm-separated 24 8 0.3333333333333333 8)
+(mean-perm-verified verified)
+(mean-zero-refuted ((((1 2 3)) false) (((2 1 3)) false) (((2 3 1)) false) (((1 3 2)) false) (((3 1 2)) false) (((3 2 1)) false)))
+(perm-k-verified verified)
+(perm-k-refuted (((#t) false)))
+(boot-ci 20 42 1.75 3.25)
+(boot-replay #t #t)
+STATS TESTS DONE
