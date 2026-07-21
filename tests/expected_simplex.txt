@@ -1,0 +1,6 @@
+(lp-optimal (4 0) z 12)
+(unbounded unbounded)
+(degenerate ((status optimal) (x (2 0)) (z 2)))
+(agrees-verified verified)
+(wrong-refuted count 36 first ((0 0 1 1 1 1) false))
+SIMPLEX TESTS DONE
