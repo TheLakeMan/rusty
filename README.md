@@ -6,6 +6,10 @@ A complete, feature-rich Lisp interpreter implemented in Rust with first-class s
 
 ---
 
+![15-second REPL demo: check-exhaustive proves a+b=b+a over the whole domain, then refutes a-b=b-a with every counterexample](https://raw.githubusercontent.com/TheLakeMan/rusty/main/docs/demo.gif)
+
+*Live above: `verified` means **ran everywhere** on a declared finite domain — and a false claim comes back with every counterexample.*
+
 ## The Three Laws
 
 wuwei, shouzhong, and mingjian — three small codebases built on Rusty — frame
