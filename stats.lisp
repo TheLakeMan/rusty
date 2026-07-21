@@ -159,20 +159,52 @@
       (lambda (p) (= (stats-mean p) 0))
       (list perms))))
 
-;; (2) Exact permutation-test count: for a declared (a b), the certificate's
-;; k equals a hand-given expected-k. Proven by check-exhaustive over a
-;; singleton domain that packages the fixture — boolean-strict.
-(define (verify-perm-k a b expected-k)
-  (check-exhaustive
-    (lambda (_)
-      (let ((c (stats-perm-test a b)))
-        (= (stats-cert-get c 'k) expected-k)))
-    (list (list #t))))
+;; (2) Independent oracle for the permutation-test count. k counts ORDERED
+;; permutations of the pool, so it must equal the number of position-SPLITS
+;; of the pool (A-part of size |a|, B-part the rest) whose statistic is
+;; ≥ obs, times |a|!·|b|! — every unordered split appears exactly that many
+;; times among the n! orderings. Two independent enumerations agreeing over
+;; a whole declared value grid is the smart-vs-dumb check (linalg/simplex
+;; pattern); the identity is positional, so duplicate values don't disturb it.
+(define (stats-fact n) (if (<= n 1) 1 (* n (stats-fact (- n 1)))))
 
-;; A deliberately wrong expected-k must be refused (witness is the singleton).
-(define (verify-perm-k-wrong a b wrong-k)
+;; All ways to split lst into (A B) with |A| = k (order within parts kept).
+(define (stats-splits lst k)
+  (cond ((= k 0) (list (list '() lst)))
+        ((null? lst) '())
+        (else
+          (append
+            (map (lambda (s) (list (cons (car lst) (car s)) (cadr s)))
+                 (stats-splits (cdr lst) (- k 1)))
+            (map (lambda (s) (list (car s) (cons (car lst) (cadr s))))
+                 (stats-splits (cdr lst) k))))))
+
+;; Raw split count: how many (A B) splits have statistic ≥ the observed one.
+(define (stats-split-count a b)
+  (let ((obs (stats-mean-diff a b)))
+    (foldl (lambda (s acc)
+             (if (>= (stats-mean-diff (car s) (cadr s)) obs) (+ acc 1) acc))
+           0
+           (stats-splits (append a b) (length a)))))
+
+;; The oracle: split count scaled by the orderings each split represents.
+(define (stats-subset-k a b)
+  (* (stats-split-count a b) (stats-fact (length a)) (stats-fact (length b))))
+
+;; For EVERY (a1 a2 b1 b2) over the declared value grid, the enumerated-perm
+;; k equals the independent oracle — a real 4-D domain, not a fixture.
+(define (verify-perm-k-oracle dom)
   (check-exhaustive
-    (lambda (_)
-      (let ((c (stats-perm-test a b)))
-        (= (stats-cert-get c 'k) wrong-k)))
-    (list (list #t))))
+    (lambda (a1 a2 b1 b2)
+      (= (stats-cert-get (stats-perm-test (list a1 a2) (list b1 b2)) 'k)
+         (stats-subset-k (list a1 a2) (list b1 b2))))
+    (list dom dom dom dom)))
+
+;; The same claim WITHOUT the |a|!·|b|! factor must be refused — the witness
+;; names the value assignment where the two counts part ways.
+(define (verify-perm-k-oracle-wrong dom)
+  (check-exhaustive
+    (lambda (a1 a2 b1 b2)
+      (= (stats-cert-get (stats-perm-test (list a1 a2) (list b1 b2)) 'k)
+         (stats-split-count (list a1 a2) (list b1 b2))))
+    (list dom dom dom dom)))

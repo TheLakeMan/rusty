@@ -157,24 +157,29 @@
            (subset-cost weights target (car masks))
            (cdr masks))))
 
-;; ── Exhaustive verification ───────────────────────────────────────────────
-;; Oracle min equals a hand-given expected cost on the declared distance matrix.
-(define (verify-tsp-oracle D expected-min)
-  (check-exhaustive
-    (lambda (_) (= (tsp-oracle-min D) expected-min))
-    (list (list #t))))
+;; ── Exhaustive verification over the REAL tour domain ─────────────────────
+;; The oracle's minimum is a true lower bound: EVERY tour in the declared set
+;; costs at least it — check-exhaustive over the actual tours, so a
+;; refutation would name the offending tour.
+(define (verify-oracle-lower-bound D)
+  (let ((m (tsp-oracle-min D)))
+    (check-exhaustive
+      (lambda (t) (>= (tsp-tour-cost D t) m))
+      (list (tsp-all-tours (length D))))))
 
-(define (verify-tsp-oracle-wrong D wrong-min)
-  (check-exhaustive
-    (lambda (_) (= (tsp-oracle-min D) wrong-min))
-    (list (list #t))))
+;; Claiming a bound one above the oracle minimum must be refused — and the
+;; witnesses are exactly the OPTIMAL tours (the refutation names them).
+(define (verify-oracle-bound-wrong D)
+  (let ((m (tsp-oracle-min D)))
+    (check-exhaustive
+      (lambda (t) (>= (tsp-tour-cost D t) (+ m 1)))
+      (list (tsp-all-tours (length D))))))
 
-;; SA final cost under seed is exactly the expected fixed cost (determinism).
-(define (verify-sa-cost D seed T0 cool steps expected-cost)
+;; For a SYMMETRIC distance matrix, reversing a tour (start pinned at 0)
+;; leaves its cost unchanged — proven over every tour in the set.
+(define (verify-tour-reversal D)
   (check-exhaustive
-    (lambda (_)
-      (anneal-seed! seed)
-      (let ((r (anneal-run (list 0 1 2 3) (lambda (t) (tsp-tour-cost D t))
-                           tsp-neighbor T0 cool steps)))
-        (= (cadr r) expected-cost)))
-    (list (list #t))))
+    (lambda (t)
+      (= (tsp-tour-cost D t)
+         (tsp-tour-cost D (cons 0 (reverse (cdr t))))))
+    (list (tsp-all-tours (length D)))))

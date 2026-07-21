@@ -46,9 +46,16 @@
 (print (list 'mean-perm-verified (verify-mean-perm-invariant (list 1 2 3))))
 (print (list 'mean-zero-refuted  (verify-mean-always-zero (list 1 2 3))))
 
-;; ── Exhaustive: hand-counted k for the separated fixture ──────────────────
-(print (list 'perm-k-verified (verify-perm-k (list 1 2) (list 9 10) 8)))
-(print (list 'perm-k-refuted  (verify-perm-k-wrong (list 1 2) (list 9 10) 0)))
+;; ── Exhaustive: perm count k ≡ independent split-count oracle ─────────────
+;; Over EVERY (a1 a2 b1 b2) ∈ {0,1,2}⁴ — 81 fixtures, two independent
+;; enumerations each (24 ordered perms vs 6 position-splits × 2!·2!).
+(print (list 'perm-k-oracle-verified (verify-perm-k-oracle (list 0 1 2))))
+;; Dropping the |a|!·|b|! factor is refused at every grid point.
+(define pkw (verify-perm-k-oracle-wrong (list 0 1 2)))
+(print (list 'perm-k-wrong-refuted 'count (length pkw) 'first (car pkw)))
+;; The independent oracle also reproduces the hand count for the separated
+;; fixture (k=8), as plain data.
+(print (list 'perm-k-hand-count (stats-subset-k (list 1 2) (list 9 10))))
 
 ;; ── Seeded bootstrap CI: fixed seed → fixed endpoints (replay = audit) ────
 ;; Small B so the golden stays short; endpoints are f64 from + - * / only.

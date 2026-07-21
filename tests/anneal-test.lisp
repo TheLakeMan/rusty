@@ -30,9 +30,13 @@
 (print (list 'tour-0213 (tsp-tour-cost D (list 0 1 3 2))))
 (print (list 'tour-0123 (tsp-tour-cost D (list 0 1 2 3))))
 
-;; Exhaustive: oracle min is 18 (verified); claim 0 refused
-(print (list 'oracle-verified (verify-tsp-oracle D 18)))
-(print (list 'oracle-refuted  (verify-tsp-oracle-wrong D 0)))
+;; Exhaustive over the REAL tour domain: the oracle min is a lower bound for
+;; every tour (verified); claiming min+1 is refused and the witnesses ARE the
+;; two optimal tours; reversal symmetry proven over the same domain.
+(print (list 'oracle-lower-bound (verify-oracle-lower-bound D)))
+(define obw (verify-oracle-bound-wrong D))
+(print (list 'oracle-bound-wrong-refuted 'count (length obw) 'witnesses (map car obw)))
+(print (list 'tour-reversal (verify-tour-reversal D)))
 
 ;; SA under seed 1: pin the found cost (deterministic under this stream).
 ;; Claim: "found cost C under seed S" — NOT optimal.
