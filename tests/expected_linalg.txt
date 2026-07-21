@@ -1,0 +1,9 @@
+(det-2x2 ((status ok) (det 3)))
+(det-3x3-tri ((status ok) (det 8)))
+(det-singular ((status pivot-failure) (row 1)))
+(solve-x (0.5 3) residual 0)
+(solve-singular pivot-failure)
+(det-grid-verified verified)
+(det-wrong-refuted count 154 first ((-1 -1 -1 0) false))
+(solve-grid-verified verified)
+LINALG TESTS DONE

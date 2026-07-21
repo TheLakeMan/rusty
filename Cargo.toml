@@ -1,6 +1,6 @@
 [package]
 name = "rusty-lisp"
-version = "0.71.0"
+version = "0.72.0"
 edition = "2021"
 description = "A modern Lisp interpreter in Rust with TCO, macros, JIT, verification checkers, and AI agent capabilities"
 license = "AGPL-3.0-or-later"   # commercial licensing available on inquiry
