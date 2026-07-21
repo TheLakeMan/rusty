@@ -149,7 +149,9 @@ fn render(toks: &[Tok]) -> String {
         let indent = stack.last().map(|c| c.base).unwrap_or(0);
         let mut line = " ".repeat(indent);
         let mut col = indent;
-        let mut prev_close_or_atom = false; // prev token wants a space before the next
+        // A space is inserted before a token unless we're at the line start, or
+        // the previous token was `(` or a reader prefix (which attach to the
+        // following form). Only these two "no space after" flags are needed.
         let mut prev_prefix = false;
         let mut prev_open = false;
 
@@ -163,12 +165,12 @@ fn render(toks: &[Tok]) -> String {
                     consume_arg1(&mut stack, line_no, paren_col); // arg1 of enclosing form is this `(`
                     stack.push(Ctx { paren_col, base: paren_col + 1, kind: Kind::Data,
                                      head_seen: false, awaiting_arg1: false, head_line: line_no });
-                    prev_open = true; prev_prefix = false; prev_close_or_atom = false;
+                    prev_open = true; prev_prefix = false;
                 }
                 Tok::Close => {
                     line.push(')'); col += 1;
                     stack.pop();
-                    prev_open = false; prev_prefix = false; prev_close_or_atom = true;
+                    prev_open = false; prev_prefix = false;
                 }
                 Tok::Prefix(p) => {
                     if col != indent && !prev_open && !prev_prefix { line.push(' '); col += 1; }
@@ -176,7 +178,7 @@ fn render(toks: &[Tok]) -> String {
                     line.push_str(p); col += p.chars().count();
                     // a prefix that heads a form marks it as a data list
                     set_head_or_arg1(&mut stack, line_no, at, HeadTok::Prefix);
-                    prev_prefix = true; prev_open = false; prev_close_or_atom = false;
+                    prev_prefix = true; prev_open = false;
                 }
                 Tok::Atom(a) => {
                     if col != indent && !prev_open && !prev_prefix { line.push(' '); col += 1; }
@@ -186,7 +188,7 @@ fn render(toks: &[Tok]) -> String {
                              else if is_number(a) { HeadTok::NonSym }
                              else { HeadTok::Sym };
                     set_head_or_arg1(&mut stack, line_no, at, ht);
-                    prev_close_or_atom = true; prev_open = false; prev_prefix = false;
+                    prev_open = false; prev_prefix = false;
                 }
                 Tok::Str(s) => {
                     if col != indent && !prev_open && !prev_prefix { line.push(' '); col += 1; }
@@ -198,13 +200,13 @@ fn render(toks: &[Tok]) -> String {
                         None => col + s.chars().count(),
                     };
                     set_head_or_arg1(&mut stack, line_no, at, HeadTok::NonSym);
-                    prev_close_or_atom = true; prev_open = false; prev_prefix = false;
+                    prev_open = false; prev_prefix = false;
                 }
                 Tok::Comment(cm) => {
                     if col != indent && !prev_open && !prev_prefix { line.push(' '); col += 1; }
                     line.push_str(cm); col += cm.chars().count();
                     // a comment never counts as a form head or argument
-                    prev_close_or_atom = false; prev_open = false; prev_prefix = false;
+                    prev_open = false; prev_prefix = false;
                 }
             }
         }
