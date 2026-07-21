@@ -1,0 +1,9 @@
+(bisect-sqrt2 ((status root) (root 1.41796875) (bracket (1.4140625 1.421875)) (iters 7) (width 0.0078125)))
+(no-sign-change ((status no-bracket) (bracket (2 3)) (f-ends (2 7))))
+(newton-sqrt2 ((status converged) (root 1.4166666666666667) (iters 2) (f-x 0.006944444444444642)))
+(newton-hard ((status max-iters) (root 2.625) (iters 3) (f-x 0.140625)))
+(brackets ((-2 -1) (1 2)))
+(localizes-verified verified)
+(localizes-refuted (((0) false) ((1) false) ((2) false) ((3) false)))
+(status root iters 7)
+ROOT TESTS DONE
