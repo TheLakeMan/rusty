@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.64.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.65.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -790,7 +790,7 @@ prototype commit to all five phases delivered in **27 days** (2026-06-22 →
 | 1 | Symbolic transformation layer — macro DSLs → computation graphs; `defrust` compiles a numeric subset to real Rust | ✅ Delivered |
 | 2 | Verifiable AI — self-contained verification (`check-effects` / `check-exhaustive`) + gradual typing, no external prover | ✅ Delivered |
 | 3 | Native ML — native tensors + reverse-mode autodiff, verified bit-for-bit against PyTorch; real multicore via the multi-process seam | ✅ Delivered |
-| 4 | Killer-app libraries — symbolic regression, synthesis, proof assistant, robotics, verified state machines, property-based testing (all golden-tested) | ✅ Delivered |
+| 4 | Killer-app libraries — symbolic regression, synthesis, proof assistant, robotics, verified state machines, property-based testing, constraint solving (all golden-tested) | ✅ Delivered |
 | 5 | Maturity — LSP, package manager, Python bridge, released on crates.io | ✅ Engineering complete; adoption ongoing |
 
 [→ **Full phase-by-phase status**](./ROADMAP.md)

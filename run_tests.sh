@@ -45,6 +45,7 @@ run_test "tests/prover-test.lisp"  "tests/expected_prover.txt" "prover-test.lisp
 run_test "tests/robot-test.lisp"   "tests/expected_robot.txt"  "robot-test.lisp (safe control)"
 run_test "tests/fsm-test.lisp"     "tests/expected_fsm.txt"    "fsm-test.lisp (verified state machines)"
 run_test "tests/pbt-test.lisp"     "tests/expected_pbt.txt"    "pbt-test.lisp (property-based testing)"
+run_test "tests/csp-test.lisp"     "tests/expected_csp.txt"    "csp-test.lisp (constraint solving)"
 run_test "tests/pkg-test.lisp"     "tests/expected_pkg.txt"    "pkg-test.lisp (package manager)"
 run_test "tests/testkit-test.lisp" "tests/expected_testkit.txt" "testkit-test.lisp (testing framework)"
 run_test "tests/evolve-test.lisp"  "tests/expected_evolve.txt"  "evolve-test.lisp (self-optimization with receipts)"

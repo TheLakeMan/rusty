@@ -1,0 +1,9 @@
+(queens-counts n4 2 n5 10 n6 4)
+(n4-first ((0 1) (1 3) (2 0) (3 2)))
+(n4-order-stable #t)
+(n5-verify (csp-verify agree #t solutions 10))
+(triangle-3color-count 6)
+(triangle-2color-solve unsat unsat? #t)
+(triangle-2color-proven-unsat verified)
+(triangle-3color-witnessed 6)
+CSP TESTS DONE
