@@ -1,0 +1,10 @@
+(sample (pbt-result status failed original (7 6 9 5) minimal (1 1 0) shrinks 9))
+(seed-stable #t)
+(other-seed-still-fails #t)
+(isort-sampled passed)
+(isort-verified (pbt-result status verified domain-size 40))
+(bubble-refuted (pbt-result status refuted counterexamples 5 first (1 1 0) minimal (1 1 0)))
+(plus-commutes verified)
+(minus-refuted (((0 1) false) ((0 2) false) ((1 0) false) ((1 2) false) ((2 0) false) ((2 1) false)))
+(raise-is-failure failed)
+PBT TESTS DONE
