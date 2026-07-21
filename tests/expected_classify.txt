@@ -1,0 +1,12 @@
+(naive-model (mammal fur dog bark))
+(naive-data-loss 0)
+(naive-logic-cost 1)
+(naive-violations ((0 1)))
+(naive-verify count 1 first (((0 1)) false))
+(guided-model (mammal fur dog fur&bark))
+(guided-data-loss 0)
+(guided-logic-cost 0)
+(guided-verify verified)
+(naive@0-1 ((mammal #f) (dog #t)))
+(guided@0-1 ((mammal #f) (dog #f)))
+CLASSIFY TESTS DONE

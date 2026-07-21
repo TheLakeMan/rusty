@@ -56,6 +56,8 @@ run_test "tests/linalg-test.lisp"  "tests/expected_linalg.txt" "linalg-test.lisp
 run_test "tests/simplex-test.lisp" "tests/expected_simplex.txt" "simplex-test.lisp (LP simplex vs brute vertices)"
 run_test "tests/interp-test.lisp"  "tests/expected_interp.txt" "interp-test.lisp (interpolation error envelopes)"
 run_test "tests/signal-test.lisp"  "tests/expected_signal.txt" "signal-test.lisp (exact DFT/FFT identities)"
+run_test "tests/listdsl-test.lisp" "tests/expected_listdsl.txt" "listdsl-test.lisp (fused list-op DSL, proven equivalent)"
+run_test "tests/classify-test.lisp" "tests/expected_classify.txt" "classify-test.lisp (logic-invariant classifier, proven)"
 run_test "tests/pkg-test.lisp"     "tests/expected_pkg.txt"    "pkg-test.lisp (package manager)"
 run_test "tests/testkit-test.lisp" "tests/expected_testkit.txt" "testkit-test.lisp (testing framework)"
 run_test "tests/evolve-test.lisp"  "tests/expected_evolve.txt"  "evolve-test.lisp (self-optimization with receipts)"

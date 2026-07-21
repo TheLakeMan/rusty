@@ -1,0 +1,12 @@
+(comprehension (9 16 25))
+(two-guards (4 6 8))
+(same-result #t (4 6 8))
+(cells naive 6 fused 3)
+(domain-size 40)
+(fusion-verified verified)
+(filter-map-fusion-verified verified)
+(map-map-law verified)
+(filter-filter-law verified)
+(sum-map-fusion verified)
+(reorder-refused count 25 first (((2)) false))
+LISTDSL TESTS DONE

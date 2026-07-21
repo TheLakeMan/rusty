@@ -2,7 +2,7 @@
 
 A complete, feature-rich Lisp interpreter implemented in Rust with first-class support for **AI agent orchestration**, **tool calling**, **LLM integration**, and **symbolic reasoning**.
 
-**Version:** 0.75.1 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
+**Version:** 0.76.0 | **Status:** Production-ready — REPL, file runner, Python bridge, AI agent loop
 
 ---
 
@@ -129,6 +129,7 @@ are load-by-name libraries, **every one pinned by a golden test**:
 | Agents & systems | `swarm` (verified synthesis via messages alone), `supervisor` (certified supervision trees), `proc` (replay-verified child processes), `pcheck` (parallel exhaustive checking), `kg` (forward-chaining inference rules) |
 | Verified state & control | `robot` (inductive controller safety), `fsm` (invariant + reachability proofs over declared machines) |
 | Verified numerics | `pbt` (property testing with shrinking + sample→exhaust upgrade), `csp` (unsat as exhaustive proof), `units` (dimensional-consistency gate), `ode` (integrators with proven trajectory invariants), `root` (root-finding certificates), `stats` (exact permutation tests), `parse` (combinators + language-equivalence checks), `anneal` (seeded SA vs exhaustive oracles), `linalg` (LU with exact-grid proofs), `simplex` (LP vs brute vertex enumeration), `interp` (interpolation with error envelopes), `signal` (DFT/FFT with exact identities) |
+| Neuro-symbolic | `listdsl` (JAX-style map/filter fusion, the fused pass **proven equivalent** to the naive one over a finite list domain), `classify` (a classifier whose predictions are **proven** to respect a declared logical invariant everywhere, `logic-loss`-guided then `check-exhaustive`-certified) |
 
 The shared discipline across all of them: every claim is proven on a **declared
 finite domain** (`check-exhaustive` — ran everywhere, never sampled) or refused
