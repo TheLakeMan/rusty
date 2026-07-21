@@ -1,0 +1,9 @@
+(nodes ((-1 6) (0 3) (1 4)))
+(lagrange-at-2 9 exact 9)
+(lagrange-at--2 13 exact 13)
+(plin-line-at-2 7)
+(lagrange-quads-verified verified)
+(plin-quads-refuted count 18 first ((-1 -1 -1) false))
+(runge ((lagrange 0.4232161356582322) (piecewise 0.17872161480235493)))
+(degree-worse-than-piecewise #t)
+INTERP TESTS DONE

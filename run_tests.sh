@@ -54,6 +54,7 @@ run_test "tests/parse-test.lisp"   "tests/expected_parse.txt"  "parse-test.lisp 
 run_test "tests/anneal-test.lisp"  "tests/expected_anneal.txt" "anneal-test.lisp (SA + exhaustive TSP oracle)"
 run_test "tests/linalg-test.lisp"  "tests/expected_linalg.txt" "linalg-test.lisp (LU det/solve + exhaustive grids)"
 run_test "tests/simplex-test.lisp" "tests/expected_simplex.txt" "simplex-test.lisp (LP simplex vs brute vertices)"
+run_test "tests/interp-test.lisp"  "tests/expected_interp.txt" "interp-test.lisp (interpolation error envelopes)"
 run_test "tests/pkg-test.lisp"     "tests/expected_pkg.txt"    "pkg-test.lisp (package manager)"
 run_test "tests/testkit-test.lisp" "tests/expected_testkit.txt" "testkit-test.lisp (testing framework)"
 run_test "tests/evolve-test.lisp"  "tests/expected_evolve.txt"  "evolve-test.lisp (self-optimization with receipts)"
