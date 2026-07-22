@@ -1733,6 +1733,18 @@ pub fn setup_builtins(env: &Env) {
             _ => Err(format!("{}: first argument must be a path string", who)),
         }
     }
+    // Hex codec shared by the ed25519 builtins (lowercase, matching file-hash).
+    fn bytes_hex(b: &[u8]) -> String {
+        let mut s = String::with_capacity(b.len() * 2);
+        for byte in b { s.push_str(&format!("{:02x}", byte)); }
+        s
+    }
+    fn hex_bytes(s: &str) -> Option<Vec<u8>> {
+        if s.len() % 2 != 0 { return None; }
+        (0..s.len()).step_by(2)
+            .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+            .collect()
+    }
     b!("file-read", |args| {
         let p = one_path(args, "file-read")?;
         std::fs::read_to_string(p).map(Value::String)
@@ -1853,6 +1865,78 @@ pub fn setup_builtins(env: &Env) {
                         .map(|p| Value::String(p.to_string())).collect())),
             _ => Err("string-split: (string-split string separator)".into()),
         }
+    });
+
+    // ── Ed25519 signatures (0.79.0, safety-island root of trust) ─────────
+    // The one asymmetric-crypto seat in the language: the owner signs a proven
+    // control law OFF-robot with a private key; the robot holds only the PUBLIC
+    // key and VERIFIES. A compromised robot can't mint owner signatures because
+    // it never holds the secret. Same "don't roll your own crypto" carve-out as
+    // file-hash (see Cargo.toml) — ed25519-dalek, a vetted pure-Rust impl.
+    // Keys/signatures are lowercase hex strings, matching file-hash's shape;
+    // messages are strings signed as their UTF-8 bytes. Ed25519 is deterministic
+    // (same key+message ⇒ same signature), so signatures are golden-stable.
+    cat!("crypto");
+    // 32-byte seed hex (64 chars) → (secret-hex public-hex). Deterministic: the
+    // seed IS the private key, so the owner generates it once from OS randomness
+    // out-of-band (`head -c32 /dev/urandom | xxd -p -c32`) and keeps it off-robot.
+    b!("ed25519-keygen", |args| {
+        use ed25519_dalek::SigningKey;
+        let seed_hex = match args.first() {
+            Some(Value::String(s)) => s,
+            _ => return Err("ed25519-keygen: (ed25519-keygen seed-hex-32-bytes)".into()),
+        };
+        let seed = hex_bytes(seed_hex)
+            .filter(|b| b.len() == 32)
+            .ok_or("ed25519-keygen: seed must be 64 hex chars (32 bytes)")?;
+        let mut sk = [0u8; 32];
+        sk.copy_from_slice(&seed);
+        let signing = SigningKey::from_bytes(&sk);
+        let public = signing.verifying_key();
+        Ok(list(vec![
+            Value::String(bytes_hex(&signing.to_bytes())),
+            Value::String(bytes_hex(public.as_bytes())),
+        ]))
+    });
+    // (ed25519-sign secret-hex message-string) → signature-hex (128 chars).
+    // Runs on the OWNER's machine, never the robot. Raises on a malformed key —
+    // signing with the wrong secret is a caller error on the trusted side.
+    b!("ed25519-sign", |args| {
+        use ed25519_dalek::{Signer, SigningKey};
+        let (sec_hex, msg) = match (args.first(), args.get(1)) {
+            (Some(Value::String(k)), Some(Value::String(m))) => (k, m),
+            _ => return Err("ed25519-sign: (ed25519-sign secret-hex message-string)".into()),
+        };
+        let sec = hex_bytes(sec_hex)
+            .filter(|b| b.len() == 32)
+            .ok_or("ed25519-sign: secret must be 64 hex chars (32 bytes)")?;
+        let mut sk = [0u8; 32];
+        sk.copy_from_slice(&sec);
+        let signing = SigningKey::from_bytes(&sk);
+        let sig = signing.sign(msg.as_bytes());
+        Ok(Value::String(bytes_hex(&sig.to_bytes())))
+    });
+    // (ed25519-verify public-hex message-string signature-hex) → #t / #f.
+    // Runs on the ROBOT, holding only the public key. REFUSE-BY-DEFAULT: any
+    // malformed input (bad hex, wrong length, bad signature) is #f, never a raise
+    // — a verifier must never crash on adversarial input, and every failure mode
+    // collapses to the same honest "not verified".
+    b!("ed25519-verify", |args| {
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        let (pub_hex, msg, sig_hex) = match (args.first(), args.get(1), args.get(2)) {
+            (Some(Value::String(p)), Some(Value::String(m)), Some(Value::String(s))) => (p, m, s),
+            _ => return Ok(Value::Bool(false)),
+        };
+        let ok = (|| -> Option<bool> {
+            let pk = hex_bytes(pub_hex).filter(|b| b.len() == 32)?;
+            let sg = hex_bytes(sig_hex).filter(|b| b.len() == 64)?;
+            let mut pk32 = [0u8; 32]; pk32.copy_from_slice(&pk);
+            let mut sg64 = [0u8; 64]; sg64.copy_from_slice(&sg);
+            let vk = VerifyingKey::from_bytes(&pk32).ok()?;
+            let signature = Signature::from_bytes(&sg64);
+            Some(vk.verify(msg.as_bytes(), &signature).is_ok())
+        })().unwrap_or(false);
+        Ok(Value::Bool(ok))
     });
 
     // ── Knowledge graph (Phase 1.3, self-built — src/kg.rs) ──────────────

@@ -181,6 +181,35 @@
 (file-delete "/tmp/rusty-hash-copy.txt")
 (println (nil? (file-hash "/tmp/rusty-hash-abc.txt")))  ; deleted: nil again
 
+;; ── ed25519 signatures (v0.79.0) ─────────────────────────────────────────
+;; Known-answer test against RFC 8032 §7.1 test-1's 32-byte seed: the public
+;; key and the empty-message signature below were cross-checked byte-for-byte
+;; against pyca/cryptography (OpenSSL), so this pins us to real Ed25519 — not
+;; to whatever we happen to compute today. Deterministic signatures, so the
+;; fixtures are golden-stable.
+(println "-- ed25519 --")
+(define ED-SEED "9d61b19deffebc3a44e135e058c2d68e08b71fc63d34d5a25d75c1bd7cbb8bce")
+(define ED-KP (ed25519-keygen ED-SEED))
+(println (cadr ED-KP))   ; RFC8032#1 public key: 15382cb2...fee764b4
+(define ED-SIG0 (ed25519-sign (car ED-KP) ""))
+(println ED-SIG0)        ; RFC8032#1 signature over the empty message: 241d8908...fecbd70d
+;; round-trip on a real message, and every failure mode is a refusal (#f), never a raise
+(define ED-MSG "48 28 20")
+(define ED-SIG (ed25519-sign (car ED-KP) ED-MSG))
+(println (ed25519-verify (cadr ED-KP) ED-MSG ED-SIG))          ; #t
+(println (ed25519-verify (cadr ED-KP) "99 99 99" ED-SIG))      ; wrong message: #f
+(println (ed25519-verify (cadr ED-KP) ED-MSG ED-SIG0))         ; wrong signature: #f
+(println (ed25519-verify (cadr ED-KP) ED-MSG "deadbeef"))      ; malformed sig: #f
+(println (ed25519-verify "zz" ED-MSG ED-SIG))                  ; malformed key: #f
+;; a one-character flip in the signature hex breaks it (tamper-evident)
+(println (ed25519-verify (cadr ED-KP) ED-MSG
+                         (string-append "00" (substring ED-SIG 2 128))))
+;; determinism: the same key+message always yields the same signature
+(println (equal? ED-SIG (ed25519-sign (car ED-KP) ED-MSG)))    ; #t
+;; a different seed yields a different key that CANNOT verify the first's signature
+(define ED-KP2 (ed25519-keygen "0000000000000000000000000000000000000000000000000000000000000001"))
+(println (ed25519-verify (cadr ED-KP2) ED-MSG ED-SIG))         ; #f
+
 ;; ── truncated source is an error, not a shorter program (v0.47.0) ────────
 ;; The parser used to close an unclosed '(' at EOF and stop dead at a stray
 ;; ')' — so a half-written file (partial clone, interrupted write) LOADED
