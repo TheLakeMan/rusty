@@ -154,7 +154,9 @@
 (println (file-hardlink? "Cargo.toml"))                 ; single-link regular file: #f
 (println (file-hardlink? "/tmp"))                       ; a directory (nlink>=2, not a file): #f
 (println (file-hardlink? "/tmp/rusty-nope-xyz"))        ; missing path: #f
-(shell "rm -f /tmp/rusty-hl-a /tmp/rusty-hl-b")
+(shell "rm -f /tmp/rusty-fifo-a /tmp/rusty-fifo-b; mkfifo /tmp/rusty-fifo-a; ln /tmp/rusty-fifo-a /tmp/rusty-fifo-b")
+(println (file-hardlink? "/tmp/rusty-fifo-a"))          ; hardlinked fifo (non-regular, 2 links): #t
+(shell "rm -f /tmp/rusty-hl-a /tmp/rusty-hl-b /tmp/rusty-fifo-a /tmp/rusty-fifo-b")
 
 ;; ── file-hash (v0.45.0) ─────────────────────────────────────────────────
 ;; Known-answer test: these are the published SHA-256 vectors for "abc" and

@@ -1771,22 +1771,28 @@ pub fn setup_builtins(env: &Env) {
         Ok(Value::Bool(std::fs::symlink_metadata(p)
             .map(|m| m.file_type().is_symlink()).unwrap_or(false)))
     });
-    // file-hardlink? (0.78.0): #t iff the path is a REGULAR FILE with a link
-    // count > 1 — i.e. another name points at the same inode. lstat (no-follow),
-    // like file-symlink?, so a symlink leaf reports #f (that's file-symlink?'s
-    // job). Directories always have nlink >= 2, so is_file() gates them out and
-    // they never false-positive. #f on a missing/unstattable path (Nil-on-miss
-    // shape). A path-confinement guard can't reason about a hardlink — both
-    // names are equally real, and neither is a symlink — so this is the only
-    // primitive that lets a guard refuse a multiply-linked leaf whose sibling
-    // link may lie outside the box. Unix-only (st_nlink); #f elsewhere.
+    // file-hardlink? (0.78.0): #t iff the path is a NON-DIRECTORY, NON-SYMLINK
+    // leaf whose inode carries more than one name (st_nlink > 1) — a genuine
+    // hardlink. lstat (no-follow), like file-symlink?. Directories legitimately
+    // have nlink >= 2 (., subdir back-links) and can't be user-hardlinked, so
+    // is_dir() gates them out; a symlink leaf is file-symlink?'s job, so
+    // is_symlink() gates it out. EVERYTHING else with a hardlink sibling — a
+    // regular file, but also a fifo/socket/device — reports #t; a confinement
+    // guard rejecting these refuses "every hardlinked leaf" without a
+    // regular-file-only blind spot. #f on a missing/unstattable path
+    // (Nil-on-miss shape). A path guard can't reason about a hardlink otherwise
+    // — both names are equally real and neither is a symlink, so file-realpath
+    // resolves to the in-box name — making this the only signal that a
+    // multiply-linked leaf's sibling may lie outside the box. Unix-only
+    // (st_nlink); #f elsewhere.
     b!("file-hardlink?", |args| {
         let p = one_path(args, "file-hardlink?")?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
             Ok(Value::Bool(std::fs::symlink_metadata(p)
-                .map(|m| m.file_type().is_file() && m.nlink() > 1)
+                .map(|m| { let ft = m.file_type();
+                           !ft.is_dir() && !ft.is_symlink() && m.nlink() > 1 })
                 .unwrap_or(false)))
         }
         #[cfg(not(unix))]
