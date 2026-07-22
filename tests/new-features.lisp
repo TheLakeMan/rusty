@@ -147,6 +147,14 @@
 (println (string? (file-realpath "Cargo.toml")))        ; resolves to a real path: #t
 (println (file-symlink? "/tmp/rusty-nope-xyz"))         ; missing path: #f
 (println (nil? (file-realpath "/tmp/rusty-nope-xyz")))  ; unresolvable: nil
+(println "-- hardlink-detect --")
+(shell "rm -f /tmp/rusty-hl-a /tmp/rusty-hl-b; printf x > /tmp/rusty-hl-a; ln /tmp/rusty-hl-a /tmp/rusty-hl-b")
+(println (file-hardlink? "/tmp/rusty-hl-a"))            ; regular file, 2 links: #t
+(println (file-symlink? "/tmp/rusty-hl-a"))             ; not a symlink: #f
+(println (file-hardlink? "Cargo.toml"))                 ; single-link regular file: #f
+(println (file-hardlink? "/tmp"))                       ; a directory (nlink>=2, not a file): #f
+(println (file-hardlink? "/tmp/rusty-nope-xyz"))        ; missing path: #f
+(shell "rm -f /tmp/rusty-hl-a /tmp/rusty-hl-b")
 
 ;; ── file-hash (v0.45.0) ─────────────────────────────────────────────────
 ;; Known-answer test: these are the published SHA-256 vectors for "abc" and

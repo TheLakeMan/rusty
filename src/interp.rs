@@ -1771,6 +1771,27 @@ pub fn setup_builtins(env: &Env) {
         Ok(Value::Bool(std::fs::symlink_metadata(p)
             .map(|m| m.file_type().is_symlink()).unwrap_or(false)))
     });
+    // file-hardlink? (0.78.0): #t iff the path is a REGULAR FILE with a link
+    // count > 1 — i.e. another name points at the same inode. lstat (no-follow),
+    // like file-symlink?, so a symlink leaf reports #f (that's file-symlink?'s
+    // job). Directories always have nlink >= 2, so is_file() gates them out and
+    // they never false-positive. #f on a missing/unstattable path (Nil-on-miss
+    // shape). A path-confinement guard can't reason about a hardlink — both
+    // names are equally real, and neither is a symlink — so this is the only
+    // primitive that lets a guard refuse a multiply-linked leaf whose sibling
+    // link may lie outside the box. Unix-only (st_nlink); #f elsewhere.
+    b!("file-hardlink?", |args| {
+        let p = one_path(args, "file-hardlink?")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Ok(Value::Bool(std::fs::symlink_metadata(p)
+                .map(|m| m.file_type().is_file() && m.nlink() > 1)
+                .unwrap_or(false)))
+        }
+        #[cfg(not(unix))]
+        { let _ = p; Ok(Value::Bool(false)) }
+    });
     // file-realpath canonicalizes: resolves symlinks + ".." to a real absolute
     // path. Nil (not an error) when the path can't be resolved — it must exist,
     // so a guard tests the parent for a not-yet-created file. Nil-on-miss keeps
