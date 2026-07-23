@@ -2,8 +2,13 @@
 (is-cert #t subject abs)
 (verify (certified abs domain-size 5))
 
+== the encoding is injective: embedded quotes are safe now ==
+(embedded-quote (certified absdoc domain-size 5))
+(no-collision #t)
+
 == tamper the claim (no re-sign): signature fails ==
-(tampered (refused bad-signature))
+(fn-tamper (refused bad-signature))
+(subject-tamper (refused bad-signature))
 
 == signed by an untrusted issuer: refused before any re-run ==
 (refused untrusted-issuer)
@@ -12,6 +17,10 @@
    (the re-run refuses what the signature would have waved through)
 (wrong-but-signed (refused counterexamples (((-3) "false") ((-1) "false"))))
 (impure-but-signed (refused impure ("print: performs I/O")))
+
+== malformed bundles are refused, never crash the receiver ==
+(missing-fields (refused malformed))
+(garbage-source error)
 
 == an issuer will not sign what fails its OWN gates ==
 (make-junk (refused counterexamples (((-3) "false") ((-1) "false"))))

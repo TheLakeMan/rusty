@@ -3,8 +3,9 @@
 
 ;; cert-test.lisp — golden for cert.lisp. Deterministic: fixed Ed25519 seeds
 ;; (signing is deterministic), no timings, no network. Proves the two layers
-;; are independent — provenance (signature) and honesty (re-run) — including
-;; the negative control where a validly-signed bundle is still refused.
+;; are independent — provenance (signature) and honesty (re-run) — the
+;; injective encoding (embedded quotes are safe; old collisions are gone), and
+;; that malformed/tampered bundles are refused before any source is eval'd.
 
 (load "cert.lisp")
 
@@ -20,16 +21,17 @@
 (define abs-inv "(lambda (f x) (and (>= (f x) 0) (or (= (f x) x) (= (f x) (- 0 x)))))")
 (define dom     (list (list -3 -1 0 2 5)))
 
-;; helpers: forge a validly-signed bundle WITHOUT gating (a lying/buggy issuer),
-;; and tamper a field of an honest bundle without re-signing.
+;; helpers: forge a validly-signed bundle WITHOUT gating (a lying/buggy issuer
+;; — signs the REAL claim message), and tamper one field of an honest bundle
+;; without re-signing.
 (define (forge secret subject fn-src inv-src domains)
   (list 'cert (list 'subject subject) (list 'fn-src fn-src)
         (list 'invariant-src inv-src) (list 'domains domains)
         (list 'issuer (cert-issuer-pub secret))
         (list 'sig (ed25519-sign secret
-                     (cert-serialize (list subject fn-src inv-src domains))))))
-(define (tamper-fn bundle new)
-  (cons 'cert (map (lambda (e) (if (equal? (car e) 'fn-src) (list 'fn-src new) e))
+                     (cert--claim-message subject fn-src inv-src domains)))))
+(define (tamper-field bundle key new)
+  (cons 'cert (map (lambda (e) (if (equal? (car e) key) (list key new) e))
                    (cdr bundle))))
 
 (display "== an honest cert, issued and independently re-verified ==") (newline)
@@ -38,8 +40,27 @@
 (display (list 'verify (cert-verify good trust))) (newline)
 (newline)
 
+(display "== the encoding is injective: embedded quotes are safe now ==") (newline)
+;; a real claim whose SOURCE contains string literals (a doc string) — pure,
+;; still computes abs. Under the old renderer its quotes could forge a field
+;; boundary; now it certifies cleanly.
+(define absdoc-fn "(lambda (x) (begin \"doc\" (if (< x 0) (- 0 x) x)))")
+(display (list 'embedded-quote
+               (cert-verify (cert-make trusted-secret 'absdoc absdoc-fn abs-inv dom) trust)))
+(newline)
+;; the classic cross-field collision pair now encodes to DIFFERENT bytes.
+(display (list 'no-collision
+               (not (equal? (cert-serialize (list "a\" \"b" "c"))
+                            (cert-serialize (list "a" "b\" \"c"))))))
+(newline)
+(newline)
+
 (display "== tamper the claim (no re-sign): signature fails ==") (newline)
-(display (list 'tampered (cert-verify (tamper-fn good "(lambda (x) x)") trust))) (newline)
+(display (list 'fn-tamper
+               (cert-verify (tamper-field good 'fn-src "(lambda (x) x)") trust))) (newline)
+;; subject is bound into the signed message too — tampering only it fails.
+(display (list 'subject-tamper
+               (cert-verify (tamper-field good 'subject 'evil) trust))) (newline)
 (newline)
 
 (display "== signed by an untrusted issuer: refused before any re-run ==") (newline)
@@ -60,6 +81,14 @@
                (cert-verify (forge trusted-secret 'abs
                               "(lambda (x) (begin (print x) x))" abs-inv dom) trust)))
 (newline)
+(newline)
+
+(display "== malformed bundles are refused, never crash the receiver ==") (newline)
+(display (list 'missing-fields (cert-verify (list 'cert (list 'subject 'x)) trust))) (newline)
+;; a trusted, validly-signed bundle whose source is unparseable garbage:
+;; refused (error ...), not a raise.
+(display (list 'garbage-source (car (cdr (cert-verify
+               (forge trusted-secret 'abs "(this is not )( valid" abs-inv dom) trust))))) (newline)
 (newline)
 
 (display "== an issuer will not sign what fails its OWN gates ==") (newline)

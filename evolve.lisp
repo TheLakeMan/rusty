@@ -129,19 +129,27 @@
 ;; came UNCHANGED from the keyholder, never that the evolution is "safe".
 ;; Additive: evolve!/evolve-vet/evolve--apply! are unchanged.
 
-;; canonical serialization of the receipt claim (self-contained; strings
-;; re-quoted; documented no-embedded-quote subset, as in pcheck/cert).
+;; canonical serialization of the receipt claim — INJECTIVE, type-tagged +
+;; length-prefixed (the same collision-free encoding cert.lisp uses; distinct
+;; data always encode to distinct strings, so no content can forge a field
+;; boundary). Self-contained so evolve.lisp needn't load cert.lisp.
+(define (evolve--len s) (number->string (string-length s)))
 (define (evolve--serialize d)
-  (cond ((null? d)    "()")
-        ((string? d)  (string-append "\"" d "\""))
-        ((symbol? d)  (symbol->string d))
-        ((number? d)  (number->string d))
-        ((boolean? d) (if d "#t" "#f"))
-        ((pair? d)    (string-append "(" (string-join (map evolve--serialize d) " ") ")"))
+  (cond ((boolean? d) (if d "bt" "bf"))
+        ((null? d)    "L0:")
+        ((string? d)  (string-append "s" (evolve--len d) ":" d))
+        ((symbol? d)  (let ((s (symbol->string d)))
+                        (string-append "y" (evolve--len s) ":" s)))
+        ((number? d)  (let ((s (number->string d)))
+                        (string-append "n" (evolve--len s) ":" s)))
+        ((pair? d)    (string-append "L" (number->string (length d)) ":"
+                                     (apply string-append (map evolve--serialize d))))
         (else (error "evolve--serialize: unrenderable datum"))))
 
+;; DOMAIN-SEPARATION tag: an evolve receipt signature can never be replayed as
+;; a cert (a different tag), even under the same key.
 (define (evolve--receipt-msg name src size)
-  (evolve--serialize (list name src size)))
+  (string-append "evolve-receipt-v1:" (evolve--serialize (list name src size))))
 
 ;; the object of the (name pred ?o) triple in the CURRENT kg, or #f.
 (define (evolve--kg-get name pred)
@@ -165,11 +173,15 @@
 
 ;; Re-derive the receipt from the CURRENT kg and check the anchor against a
 ;; trusted public key supplied OUT OF BAND. #t only if the recorded
-;; (name, source, domain-size) still matches what was signed.
+;; (name, source, domain-size) still matches what was signed AND the recorded
+;; issuer IS the trusted key (all four triples must be present — a missing
+;; source/size/anchor/issuer is #f, never a message built from a #f field).
 (define (evolve-verify-anchored name trusted-pub)
-  (let ((src  (evolve--kg-get name 'evolved-to))
-        (size (evolve--kg-get name 'evolve-domain-size))
-        (sig  (evolve--kg-get name 'evolve-anchor)))
-    (if (or (not src) (not sig))
+  (let ((src    (evolve--kg-get name 'evolved-to))
+        (size   (evolve--kg-get name 'evolve-domain-size))
+        (sig    (evolve--kg-get name 'evolve-anchor))
+        (issuer (evolve--kg-get name 'evolve-issuer)))
+    (if (or (not src) (not size) (not sig) (not issuer))
         #f
-        (ed25519-verify trusted-pub (evolve--receipt-msg name src size) sig))))
+        (and (equal? issuer trusted-pub)
+             (ed25519-verify trusted-pub (evolve--receipt-msg name src size) sig)))))

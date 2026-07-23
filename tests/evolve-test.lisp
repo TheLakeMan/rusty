@@ -93,7 +93,7 @@
 (define real-size (evolve--kg-get 'squarer 'evolve-domain-size))
 (display (list 'tampered-record
                (ed25519-verify anchor-pub
-                 (evolve--serialize (list 'squarer '(lambda (n) (+ n n)) real-size))
+                 (evolve--receipt-msg 'squarer '(lambda (n) (+ n n)) real-size)
                  real-sig))) (newline)                       ; #f — the anchor refuses it
 
 (display "EVOLVE TESTS DONE") (newline)
