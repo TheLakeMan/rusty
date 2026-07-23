@@ -50,6 +50,17 @@
                                            (file-delete (string-append box "/m.json")) 'ok)
                                     (e) 'FAIL))) (newline)
 
+;; Kernel-confinement status is OBSERVABLE, not a silent degrade — a caller can
+;; tell whether Landlock actually engaged or only the userspace floor did. Assert
+;; ONLY kernel-independent facts: the exact verdict depends on the CI kernel's
+;; Landlock support (fully-enforced on a capable kernel, not-enforced without it),
+;; so it can't be a portable golden value — see benchmarks/sandbox_landlock_probe.sh.
+(display (list 'kstatus-symbol (symbol? (sandbox-kernel-status))
+               ;; strict enable RETURNS a status symbol when the kernel is fencing,
+               ;; or RAISES our clear message otherwise — both are #t on any kernel.
+               'strict-loud (try-catch (symbol? (sandbox-enable-strict! box))
+                                       (e) (string-contains? e "kernel confinement not enforced")))) (newline)
+
 ;; One-way latch: the sandbox can only narrow, never widen or clear.
 (display (list 'cannot-widen
   (try-catch (begin (sandbox-enable! "/tmp") #f)

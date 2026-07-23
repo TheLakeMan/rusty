@@ -47,12 +47,24 @@
 //! `/etc/resolv.conf`) will fail. That is the confinement working as intended,
 //! not a bug; don't sandbox a run that needs the network.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 
 thread_local! {
     static ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    // The Landlock verdict from the last `enable()`, so a caller can tell whether
+    // the KERNEL layer actually engaged (not just the userspace floor) — and
+    // demand it, via `sandbox-enable-strict!`. "inactive" until first enable;
+    // "unsupported" off Linux; else the RulesetStatus / "error". This is what
+    // makes the best-effort degrade OBSERVABLE instead of silent.
+    static KERNEL_STATUS: Cell<&'static str> = const { Cell::new("inactive") };
 }
+
+/// The kernel-confinement verdict from the most recent `enable()`:
+/// "inactive" (never enabled) | "fully-enforced" | "partially-enforced"
+/// (older Landlock ABI — the core open-fence still holds) | "not-enforced"
+/// (kernel has no Landlock / it's disabled) | "error" | "unsupported" (non-Linux).
+pub fn kernel_status() -> &'static str { KERNEL_STATUS.with(|s| s.get()) }
 
 fn deny(who: &str, path: &str, root: &Path) -> String {
     format!("{}: refused — path '{}' escapes the sandbox root {}",
@@ -96,6 +108,7 @@ fn apply_kernel_confinement(root: &Path) {
     // Request the widest access set the crate knows; BestEffort downgrades the
     // handled rights to whatever THIS kernel actually supports (or to nothing on a
     // kernel with no Landlock at all — a clean no-op, not an error).
+    use landlock::RulesetStatus;
     let abi = ABI::V5;
     let all = AccessFs::from_all(abi);
     let result = (|| -> Result<landlock::RestrictionStatus, Box<dyn std::error::Error>> {
@@ -107,6 +120,17 @@ fn apply_kernel_confinement(root: &Path) {
             .add_rule(PathBeneath::new(fd, all))?
             .restrict_self()?)
     })();
+    // Record the verdict so `sandbox-kernel-status` can report it and a strict
+    // caller can refuse when the kernel didn't actually engage.
+    let status = match &result {
+        Ok(s) => match s.ruleset {
+            RulesetStatus::FullyEnforced => "fully-enforced",
+            RulesetStatus::PartiallyEnforced => "partially-enforced",
+            RulesetStatus::NotEnforced => "not-enforced",
+        },
+        Err(_) => "error",
+    };
+    KERNEL_STATUS.with(|c| c.set(status));
     // Golden-safe introspection: only when RUSTY_SANDBOX_DEBUG is set, and only to
     // STDERR (run_tests.sh diffs stdout, so this can never move a golden). Lets the
     // manual probe confirm the kernel actually enforced the ruleset on this kernel.
@@ -119,7 +143,9 @@ fn apply_kernel_confinement(root: &Path) {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn apply_kernel_confinement(_root: &Path) { /* no Landlock off Linux — floor only */ }
+fn apply_kernel_confinement(_root: &Path) {
+    KERNEL_STATUS.with(|c| c.set("unsupported")); // no Landlock off Linux — floor only
+}
 
 pub fn is_active() -> bool { ROOT.with(|r| r.borrow().is_some()) }
 pub fn root() -> Option<PathBuf> { ROOT.with(|r| r.borrow().clone()) }

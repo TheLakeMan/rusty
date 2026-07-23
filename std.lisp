@@ -805,6 +805,28 @@
         #f)))
 (categorize! 'memory '(memory-seal memory-verify))
 
+;; ── Sandbox: demand KERNEL confinement, don't run floor-only silently ────────
+;; (sandbox-enable! root) is best-effort: it always applies the userspace floor,
+;; and applies a Landlock kernel fence on top WHERE AVAILABLE (Linux >=5.13),
+;; silently degrading to floor-only otherwise. That silent degrade is a footgun
+;; for a caller who NEEDS kernel enforcement — they'd believe they're confined at
+;; the kernel when they're not. sandbox-enable-strict! makes it loud: it enables,
+;; then RAISES unless the kernel actually engaged (fully- or partially-enforced —
+;; both fence file opens under the root). The floor is already latched before the
+;; raise (one-way, never weakened); the raise only signals the kernel gap, so a
+;; caller can abort a run that requires real kernel confinement. Returns the
+;; kernel status symbol on success. NOT a safety claim — see src/sandbox.rs scope.
+(define (sandbox-enable-strict! root)
+  (sandbox-enable! root)
+  (let ((st (sandbox-kernel-status)))
+    (if (or (equal? st 'fully-enforced) (equal? st 'partially-enforced))
+        st
+        (error (string-append
+                 "sandbox-enable-strict!: kernel confinement not enforced (status: "
+                 (symbol->string st)
+                 ") — refusing to proceed floor-only; use sandbox-enable! to accept best-effort")))))
+(categorize! 'filesystem '(sandbox-enable-strict!))
+
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch
   (load "agent-tools.lisp")

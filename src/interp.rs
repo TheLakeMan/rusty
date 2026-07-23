@@ -1767,6 +1767,13 @@ pub fn setup_builtins(env: &Env) {
     b!("sandbox-root", |_args| Ok(crate::sandbox::root()
         .map(|pb| Value::String(pb.to_string_lossy().into_owned()))
         .unwrap_or(Value::Nil)));
+    // The KERNEL-confinement (Landlock) verdict from the last sandbox-enable!, so
+    // a caller can tell whether the kernel layer actually engaged or only the
+    // userspace floor did — making the best-effort degrade OBSERVABLE, never
+    // silent. std.lisp's sandbox-enable-strict! turns a non-enforced verdict into
+    // a raise. Symbols: inactive | fully-enforced | partially-enforced |
+    // not-enforced | error | unsupported (non-Linux).
+    b!("sandbox-kernel-status", |_args| Ok(Value::Symbol(crate::sandbox::kernel_status().to_string())));
     b!("file-read", |args| {
         let p = one_path(args, "file-read")?;
         crate::sandbox::check_read(p, "file-read")?;

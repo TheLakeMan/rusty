@@ -37,6 +37,7 @@ SCRIPT="$(mktemp /tmp/rusty-ll-probe-XXXX.lisp)"
 cat > "$SCRIPT" <<EOF
 (sandbox-enable! "$BOX")
 (define (refused? t) (try-catch (begin (t) #f) (e) (string-contains? e "refused")))
+(display (list 'kernel-status (sandbox-kernel-status))) (newline)
 (display (list 'in-box   (try-catch (begin (save-model "$BOX/m.json" 7) 'ok) (e) 'FAIL))) (newline)
 (display (list 'out-box  (refused? (lambda () (save-model "$OUT" 1))))) (newline)
 EOF
