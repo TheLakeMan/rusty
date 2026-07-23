@@ -14,6 +14,8 @@
   recall         ; reads the owner's real memory store
   forget         ; mutates the owner's real memory store
   memory-list    ; dumps the owner's real memory keys
+  memory-seal    ; Ed25519-signs the owner's real ~/.rusty store (would write a .sig + need a key)
+  memory-verify  ; verifies the owner's real store against a seal that isn't present in a golden
   ;; memory-path is exercised (string? only) in commands-test.lisp
 
   ;; ── Compile-to-Rust / slow / cache-dependent ────────────────────────────

@@ -85,6 +85,9 @@ refused
 refused
 echoed ok-1
 refused
+(snap-has-spec #t snap-unknown #f)
+echoed ok-1
+refused
 (lx-before-define 10)
 (lx-after-define 2)
 (lx-global-untouched 10)
@@ -97,4 +100,5 @@ refused
 (rb-recursion refused rb-nesting refused rb-drop ok)
 (vh-strict (((1) "non-boolean: 0")) vh-bool verified)
 (vh-unchecked ((unchecked missing-domains-or-invariant)) vh-full verified)
+(ce-eval-string ("eval-string: evaluates arbitrary code (may perform any effect)") ce-eval ("eval: evaluates arbitrary code (may perform any effect)") ce-defrust ("defrust: compiles native code (spawns rustc, touches the filesystem)") ce-graph ("graph-compile: compiles native code (spawns rustc, touches the filesystem)"))
 (vh-not-nil #f vh-not-false #t vh-not-zero #f vh-if-nil then vh-not-arity raised)

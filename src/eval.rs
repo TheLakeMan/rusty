@@ -633,6 +633,9 @@ impl Evaluator {
                                     Value::String(s) => s.clone(),
                                     _ => return Err(format!("{}: filename must be a string", head)),
                                 };
+                                // load reads AND executes a file, so a sandbox
+                                // must confine it like any other read.
+                                crate::sandbox::check_read(&path_str, "load")?;
                                 let code = std::fs::read_to_string(&path_str)
                                     .map_err(|e| format!("load: cannot read '{}': {}", path_str, e))?;
                                 let tokens = crate::lexer::Lexer::new(&code).tokenize();
@@ -666,6 +669,7 @@ impl Evaluator {
                                     Value::String(s) => s,
                                     _ => return Err("checkpoint: filename must be a string".into()),
                                 };
+                                crate::sandbox::check_write(&path, "checkpoint")?;
                                 return crate::checkpoint::write_checkpoint(&path, &env);
                             }
 
@@ -965,6 +969,7 @@ impl Evaluator {
 
                             // ── defrust: codegen + compile + load real Rust ──
                             "defrust" => {
+                                crate::sandbox::require_no_subprocess("defrust")?;
                                 if lst.len() != 4 { return Err("defrust: (defrust name (params...) body)".into()); }
                                 let name = sym_name(&lst[1], "defrust")?;
                                 let params = match &lst[2] {
@@ -982,6 +987,7 @@ impl Evaluator {
                             // recursion) — plain Rust calls, no cross-library
                             // linking. (defrust* (name (params...) body)...)
                             "defrust*" => {
+                                crate::sandbox::require_no_subprocess("defrust*")?;
                                 let mut defs = Vec::with_capacity(lst.len() - 1);
                                 for d in &lst[1..] {
                                     let Expr::List(parts) = d else {

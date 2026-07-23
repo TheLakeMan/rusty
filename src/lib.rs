@@ -30,6 +30,7 @@ mod checkpoint;
 mod trace;
 mod type_check;
 mod effect_check;
+mod sandbox;
 mod kg;
 mod fmt;
 

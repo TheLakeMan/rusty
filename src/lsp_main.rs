@@ -31,6 +31,7 @@ mod checkpoint;
 mod trace;
 mod type_check;
 mod effect_check;
+mod sandbox;
 mod kg;
 mod fmt;
 
@@ -202,10 +203,22 @@ fn word_at(text: &str, line: u32, character: u32) -> Option<String> {
 }
 
 fn main() {
-    // Run on the main thread with the recursion guard sized to `ulimit -s`,
-    // like the CLI (see src/main.rs).
-    eval::set_interp_stack(eval::native_stack_limit_bytes());
-    run_lsp();
+    // Size the recursion guard to the stack we actually run on. On Linux that
+    // is the main thread (guard sized to `ulimit -s`); elsewhere we can't read
+    // the real main-thread stack, so run on a thread whose size we set and
+    // match the guard to it — never a guess that could abort. See src/main.rs.
+    if !cfg!(target_os = "linux") || std::env::var("RUSTY_FORCE_SPAWN").is_ok() {
+        let stack = eval::interp_stack_bytes();
+        let handle = std::thread::Builder::new()
+            .name("rusty-lsp".into())
+            .stack_size(stack)
+            .spawn(move || { eval::set_interp_stack(stack); run_lsp(); })
+            .expect("failed to spawn LSP thread");
+        if handle.join().is_err() { std::process::exit(101); }
+    } else {
+        eval::set_interp_stack(eval::native_stack_limit_bytes());
+        run_lsp();
+    }
 }
 
 fn run_lsp() {

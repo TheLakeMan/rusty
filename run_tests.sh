@@ -70,6 +70,7 @@ run_test "tests/commands-test.lisp" "tests/expected_commands.txt" "commands-test
 # the sentinel proves env-scrubbing: the parent has it, the isolated child must not
 PROC_SANDBOX_SENTINEL=leaked run_test "tests/proc-test.lisp" "tests/expected_proc.txt" "proc-test.lisp (multi-process seam)"
 run_test "tests/pcheck-test.lisp"  "tests/expected_pcheck.txt" "pcheck-test.lisp (parallel check-exhaustive)"
+run_test "tests/sandbox-test.lisp" "tests/expected_sandbox.txt" "sandbox-test.lisp (filesystem/subprocess confinement)"
 
 # rusty-lsp speaks framed JSON-RPC on stdio — a scripted session instead of a golden diff
 if python3 tests/lsp-test.py > /dev/null 2>&1; then
@@ -88,7 +89,7 @@ for f in tests/tests.lisp tests/new-features.lisp tests/hello.lisp swarm.lisp \
          tests/robot-test.lisp tests/pkg-test.lisp tests/testkit-test.lisp \
          tests/kg-test.lisp tests/discover-test.lisp tests/commands-test.lisp \
          tests/proc-test.lisp tests/pcheck-test.lisp tests/evolve-test.lisp \
-         tests/supervisor-test.lisp tests/fmt-test.lisp; do
+         tests/supervisor-test.lisp tests/fmt-test.lisp tests/sandbox-test.lisp; do
     RUSTY_COVERAGE=1 "$RUSTY" "$f" >/dev/null 2>&1
 done
 # check runs WITHOUT RUSTY_COVERAGE so it doesn't record itself

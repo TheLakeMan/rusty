@@ -1,0 +1,8 @@
+(active-before #f)
+(active-after #t)
+(root-set #t)
+(in-box-read "in-box")
+(abs-read #t dotdot-read #t abs-write #t dotdot-list #t)
+(shell #t proc-eval #t proc-pmap #t)
+(cannot-widen #t)
+#t

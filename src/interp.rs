@@ -1278,6 +1278,7 @@ pub fn setup_builtins(env: &Env) {
     // and compiled through the same rustc/cache/libloading pipeline as
     // defrust. Call it like any function: ((graph-compile f) 1 2).
     b!("graph-compile", |args| {
+        crate::sandbox::require_no_subprocess("graph-compile")?;
         match args.first() {
             Some(Value::Lambda { params, body, .. }) => {
                 if body.len() != 1 { return Err("graph-compile: lambda body must be a single expression".into()); }
@@ -1330,6 +1331,7 @@ pub fn setup_builtins(env: &Env) {
     // work happens once, here. Calling the result with differently-shaped
     // tensors is an error: compile again for new shapes.
     b!("graph-compile-grad", |args| {
+        crate::sandbox::require_no_subprocess("graph-compile-grad")?;
         let (params, body, rest) = match args.split_first() {
             Some((Value::Lambda { params, body, .. }, rest)) => (params, body, rest),
             _ => return Err("graph-compile-grad: (graph-compile-grad (lambda (params...) loss-expr) example-args...)".into()),
@@ -1484,6 +1486,7 @@ pub fn setup_builtins(env: &Env) {
     // ── System / shell ────────────────────────────────────────────────────
     cat!("system");
     b!("shell", |args| {
+        crate::sandbox::require_no_subprocess("shell")?;
         if args.is_empty() { return Err("shell: needs a command string".into()); }
         let cmd = match &args[0] {
             Value::String(s) => s.clone(),
@@ -1593,6 +1596,7 @@ pub fn setup_builtins(env: &Env) {
     }
     b!("proc-eval", |args| {
         use std::time::{Duration, Instant};
+        crate::sandbox::require_no_subprocess("proc-eval")?;
         let code = match args.first() {
             Some(Value::String(s)) => s.clone(),
             _ => return Err("proc-eval: first argument must be a code string".into()),
@@ -1641,6 +1645,7 @@ pub fn setup_builtins(env: &Env) {
     // the answer.
     b!("proc-pmap", |args| {
         use std::time::{Duration, Instant};
+        crate::sandbox::require_no_subprocess("proc-pmap")?;
         type Running = (usize, std::process::Child, std::path::PathBuf, Instant);
         let codes: Vec<String> = match args.first() {
             Some(Value::List(items)) => {
@@ -1745,13 +1750,27 @@ pub fn setup_builtins(env: &Env) {
             .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
             .collect()
     }
+    // Sandbox (one-way filesystem/subprocess confinement). Opt-in: nothing is
+    // confined until (sandbox-enable! root) is called, and once called it can
+    // only be narrowed to a sub-path, never widened or cleared — so code under
+    // a sandbox cannot escape by re-calling it. See src/sandbox.rs.
+    b!("sandbox-enable!", |args| {
+        let root = one_path(args, "sandbox-enable!")?;
+        crate::sandbox::enable(root).map(|pb| Value::String(pb.to_string_lossy().into_owned()))
+    });
+    b!("sandbox-active?", |_args| Ok(Value::Bool(crate::sandbox::is_active())));
+    b!("sandbox-root", |_args| Ok(crate::sandbox::root()
+        .map(|pb| Value::String(pb.to_string_lossy().into_owned()))
+        .unwrap_or(Value::Nil)));
     b!("file-read", |args| {
         let p = one_path(args, "file-read")?;
+        crate::sandbox::check_read(p, "file-read")?;
         std::fs::read_to_string(p).map(Value::String)
             .map_err(|e| format!("file-read: {}: {}", p, e))
     });
     b!("file-write", |args| {
         let p = one_path(args, "file-write")?;
+        crate::sandbox::check_write(p, "file-write")?;
         let c = match args.get(1) { Some(Value::String(s)) => s.clone(),
                                     Some(other) => format!("{}", other),
                                     None => return Err("file-write: (file-write path content)".into()) };
@@ -1761,6 +1780,7 @@ pub fn setup_builtins(env: &Env) {
     b!("file-append", |args| {
         use std::io::Write;
         let p = one_path(args, "file-append")?;
+        crate::sandbox::check_write(p, "file-append")?;
         let c = match args.get(1) { Some(Value::String(s)) => s.clone(),
                                     Some(other) => format!("{}", other),
                                     None => return Err("file-append: (file-append path content)".into()) };
@@ -1770,7 +1790,9 @@ pub fn setup_builtins(env: &Env) {
             .map_err(|e| format!("file-append: {}: {}", p, e))
     });
     b!("file-exists?", |args| {
-        Ok(Value::Bool(std::path::Path::new(one_path(args, "file-exists?")?).exists()))
+        let p = one_path(args, "file-exists?")?;
+        crate::sandbox::check_read(p, "file-exists?")?;
+        Ok(Value::Bool(std::path::Path::new(p).exists()))
     });
     // Symlink safety primitives (0.42.0). file-read/write/etc. all FOLLOW
     // symlinks, so a string-prefix "under the box?" guard is defeated by a
@@ -1780,6 +1802,7 @@ pub fn setup_builtins(env: &Env) {
     // (including a dangling one); #f for a regular file or a missing path.
     b!("file-symlink?", |args| {
         let p = one_path(args, "file-symlink?")?;
+        crate::sandbox::check_stat(p, "file-symlink?")?; // no-follow: leaf may be a symlink, parent must be in-box
         Ok(Value::Bool(std::fs::symlink_metadata(p)
             .map(|m| m.file_type().is_symlink()).unwrap_or(false)))
     });
@@ -1799,6 +1822,7 @@ pub fn setup_builtins(env: &Env) {
     // (st_nlink); #f elsewhere.
     b!("file-hardlink?", |args| {
         let p = one_path(args, "file-hardlink?")?;
+        crate::sandbox::check_stat(p, "file-hardlink?")?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
@@ -1816,6 +1840,7 @@ pub fn setup_builtins(env: &Env) {
     // guard predicates branch-free, like recall.
     b!("file-realpath", |args| {
         let p = one_path(args, "file-realpath")?;
+        crate::sandbox::check_read(p, "file-realpath")?; // don't reveal a realpath that resolves out of box
         Ok(std::fs::canonicalize(p)
             .map(|pb| Value::String(pb.to_string_lossy().into_owned()))
             .unwrap_or(Value::Nil))
@@ -1831,6 +1856,7 @@ pub fn setup_builtins(env: &Env) {
     b!("file-hash", |args| {
         use sha2::{Digest, Sha256};
         let p = one_path(args, "file-hash")?;
+        crate::sandbox::check_read(p, "file-hash")?;
         let mut f = match std::fs::File::open(p) { Ok(f) => f, Err(_) => return Ok(Value::Nil) };
         let mut hasher = Sha256::new();
         if std::io::copy(&mut f, &mut hasher).is_err() { return Ok(Value::Nil); }
@@ -1838,16 +1864,19 @@ pub fn setup_builtins(env: &Env) {
     });
     b!("file-delete", |args| {
         let p = one_path(args, "file-delete")?;
+        crate::sandbox::check_stat(p, "file-delete")?; // parent in-box; unlink removes the leaf (may be a symlink)
         std::fs::remove_file(p).map(|_| Value::Bool(true))
             .map_err(|e| format!("file-delete: {}: {}", p, e))
     });
     b!("dir-create", |args| {
         let p = one_path(args, "dir-create")?;
+        crate::sandbox::check_write(p, "dir-create")?;
         std::fs::create_dir_all(p).map(|_| Value::Bool(true))
             .map_err(|e| format!("dir-create: {}: {}", p, e))
     });
     b!("dir-list", |args| {
         let p = one_path(args, "dir-list")?;
+        crate::sandbox::check_read(p, "dir-list")?;
         let mut names: Vec<String> = std::fs::read_dir(p)
             .map_err(|e| format!("dir-list: {}: {}", p, e))?
             .filter_map(|ent| ent.ok().map(|e| e.file_name().to_string_lossy().into_owned()))

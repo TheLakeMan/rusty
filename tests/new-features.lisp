@@ -245,6 +245,7 @@
 (deftool sc-echo (x) "Echo" (str "echoed " x))
 (deftool-spec sc-echo '((x string)) '() (lambda (x) (string-starts-with? x "ok")) '())
 (define PINNED (tool-spec 'sc-echo))
+(define SNAP (registry-snapshot '(sc-echo)))               ; freeze the whole tool set once
 (println (safe-call sc-echo "ok-1"))                       ; global spec: allowed
 (println (try-catch (safe-call sc-echo "no-1") (e) 'refused))
 ;; Now REPLACE the spec — as a second tenant registering the same tool name would
@@ -252,6 +253,13 @@
 (println (try-catch (safe-call sc-echo "ok-1") (e) 'refused))   ; global changed: now refused
 (println (safe-call-with-spec PINNED sc-echo "ok-1"))           ; pinned spec: still enforced
 (println (try-catch (safe-call-with-spec PINNED sc-echo "zz-1") (e) 'refused))
+;; Immutable registry snapshot (#2/#3): the frozen snapshot dispatches by NAME
+;; against the specs captured before the poison, so the widened global cannot
+;; reach it — the certified "ok" precondition is still enforced.
+(println (list 'snap-has-spec (not (equal? (snapshot-spec SNAP 'sc-echo) #f))
+               'snap-unknown  (snapshot-spec SNAP 'no-such-tool)))
+(println (safe-call-in SNAP sc-echo "ok-1"))                    ; snapshot spec: allowed
+(println (try-catch (safe-call-in SNAP sc-echo "zz-1") (e) 'refused))  ; snapshot rejects the poison's new rule
 
 ; ── Lexical addressing (v0.56.0) — resolved refs must be invisible ──────
 ; Slot-resolved variables (resolve.rs) rewrite lambda bodies created at
@@ -317,6 +325,16 @@
                'vh-full (verify-candidate (lambda (x) (* x x))
                           (list (list 'domains (list (list 0 1 2)))
                                 (list 'invariant (lambda (f x) (>= (f x) 0))))))) (newline)
+
+;; Security fix: check-effects no longer certifies a body that runs arbitrary
+;; code (eval/eval-string) or compiles native code (defrust/graph-compile) as
+;; PURE — the exact hole a `(lambda (x) (eval-string x))` used to slip through
+;; (it admitted no effect yet could do anything). Each is now a named effect,
+;; so wuwei/shouzhong purity gates that trust check-effects catch it.
+(display (list 'ce-eval-string (check-effects (lambda (x) (eval-string x)))
+               'ce-eval (check-effects (lambda (d) (eval d)))
+               'ce-defrust (check-effects (lambda () (defrust (f x) (* x x))))
+               'ce-graph (check-effects (lambda () (graph-compile g))))) (newline)
 (display (list 'vh-not-nil (not nil) 'vh-not-false (not #f) 'vh-not-zero (not 0)
                'vh-if-nil (if nil 'then 'else)
                'vh-not-arity (try-catch (not) (e) 'raised))) (newline)

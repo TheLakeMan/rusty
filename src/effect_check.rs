@@ -30,11 +30,21 @@ pub fn effect_reason(op: &str) -> Option<&'static str> {
         | "checkpoint"
             => Some("touches the filesystem"),
         "llm" | "tool-call" | "react-loop" => Some("calls an external LLM/tool"),
+        // Executes arbitrary code at runtime — anything reachable through it
+        // escapes this static analysis, so it must itself be treated as
+        // maximally effectful (this is what a `(lambda (x) (eval-string x))`
+        // body used to hide: it certified pure yet could do anything).
+        "eval" | "eval-string" => Some("evaluates arbitrary code (may perform any effect)"),
+        // Compile paths shell out to rustc and write the cached .so — a
+        // subprocess plus filesystem writes.
+        "defrust" | "defrust*" | "graph-compile" | "graph-compile-grad"
+            => Some("compiles native code (spawns rustc, touches the filesystem)"),
         "remember" | "recall" | "forget" | "memory-list" => Some("reads or writes persistent memory"),
         "kg-add!" | "kg-clear!" | "kg-query" | "kg-count" | "kg-triples"
         | "kg-load-ntriples" | "kg-save-ntriples"
             => Some("reads or writes the knowledge graph"),
         "gensym" => Some("non-deterministic — returns a different value each call"),
+        "sandbox-enable!" => Some("changes the sandbox confinement (process state)"),
         "load" | "load-relative" => Some("loads and executes another file"),
         _ => None,
     }

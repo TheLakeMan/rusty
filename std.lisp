@@ -505,6 +505,27 @@
   (apply safe-call-with-spec
          (cons (tool-spec (tool-name tool)) (cons tool args))))
 
+;; ── Immutable spec registry snapshot (security-review fix, #2/#3) ────────────
+;; *tool-specs* is a GLOBAL MUTABLE alist and deftool-spec REPLACES a name's
+;; entry, so `safe-call`'s runtime lookup is poisonable: agent B (or a later
+;; call) can re-register a tool with a WIDER precondition between the moment a
+;; caller certified it and the moment it fires (cross-agent poisoning / TOCTOU).
+;; registry-snapshot resolves the specs for a named tool set ONCE into a frozen
+;; value (plain immutable list data — captured by value, closures and all);
+;; safe-call-in dispatches against THAT snapshot. A subsequent deftool-spec only
+;; rebinds the global *tool-specs*; it cannot reach into an already-taken
+;; snapshot, so an already-certified caller keeps enforcing the spec it certified.
+(define (registry-snapshot names)
+  (map (lambda (n) (list n (tool-spec n))) names))
+
+(define (snapshot-spec snap name)
+  (let ((row (assoc name snap)))
+    (if row (cadr row) #f)))
+
+(define (safe-call-in snap tool . args)
+  (apply safe-call-with-spec
+         (cons (snapshot-spec snap (tool-name tool)) (cons tool args))))
+
 ;; Effect honesty: every operation check-effects finds in the tool's body
 ;; must be covered by its declared effects list — a tool can't claim less
 ;; than it does. (Static, never executes the tool.)
@@ -753,11 +774,36 @@
 (categorize! 'llm '(llm-proposer))
 (categorize! 'tools '(deftool-spec tool-spec spec-tool-value spec-param-types spec-effects
                        spec-pre spec-deps type-pred safe-call finding-op undeclared-effects
-                       certify-tool-chain))
+                       certify-tool-chain registry-snapshot snapshot-spec safe-call-in))
 (categorize! 'agents '(agent-reset! agent-spawn agent-names mailbox-count mailbox-set!
                         send! agents-step agents-idle? run-agents))
 (categorize! 'meta '(commands reg-row describe apropos help help-category help-categories
                       uniq-sorted sort-rows row-merge))
+
+;; ── Memory integrity seal (security-review fix) ──────────────────────────────
+;; remember/recall store plaintext with no integrity, so tampering is otherwise
+;; undetectable — and a plain hash written into the same tree is forgeable (an
+;; attacker who can edit the store can recompute it). memory-seal signs the
+;; store's EXACT bytes with an Ed25519 secret held OUT-OF-BAND (off-machine, like
+;; the USB key); memory-verify re-reads the store and checks it against the
+;; public key. Refuse-by-default: a tampered store, a missing store, or a missing
+;; seal all verify #f. Any legitimate `remember`/`forget` also breaks the seal
+;; until re-sealed — that is the honest tamper-EVIDENCE model. Claim: unforgeable
+;; without the private key — NOT tamper-proof (a keyholder can re-sign anything).
+(define (memory-seal secret)
+  (let* ((msg (string-append "rusty-memory-v1:"
+                (if (file-exists? (memory-path)) (file-read (memory-path)) "")))
+         (sig (ed25519-sign secret msg)))
+    (file-write (string-append (memory-path) ".sig") sig)
+    sig))
+(define (memory-verify pubkey)
+  (let* ((sp  (string-append (memory-path) ".sig"))
+         (msg (string-append "rusty-memory-v1:"
+                (if (file-exists? (memory-path)) (file-read (memory-path)) ""))))
+    (if (file-exists? sp)
+        (ed25519-verify pubkey msg (file-read sp))
+        #f)))
+(categorize! 'memory '(memory-seal memory-verify))
 
 ;; ── Agent tools ────────────────────────────────────────────────────────────
 (try-catch

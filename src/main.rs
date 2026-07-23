@@ -14,6 +14,7 @@ mod checkpoint;
 mod trace;
 mod type_check;
 mod effect_check;
+mod sandbox;
 mod kg;
 mod fmt;
 
@@ -34,17 +35,41 @@ fn dump_coverage() {
     }
 }
 
+/// Whether to run the interpreter on a freshly-spawned thread with an explicit
+/// stack size instead of in place on the main thread. On Linux the main-thread
+/// stack grows on demand up to `RLIMIT_STACK`, readable from `/proc/self/limits`,
+/// so we size the guard to it and run in place (fastest TLS on the eval hot
+/// path). Everywhere else there is no portable way to read the real main-thread
+/// stack size, and it varies by platform — so rather than GUESS (an 8 MB guess
+/// that is too high aborts the process before the guard trips), we run on a
+/// thread whose stack size we control and size the guard to exactly match.
+/// `RUSTY_FORCE_SPAWN` forces the spawned path on any OS (used to test it).
+fn run_on_own_stack() -> bool {
+    if std::env::var("RUSTY_FORCE_SPAWN").is_ok() { return true; }
+    !cfg!(target_os = "linux")
+}
+
 fn main() {
     // The Rc-based core recurses on the native stack for non-tail eval,
     // recursive parsing, and value display; without a guard, deep enough input
-    // *aborts* the process (a Rust stack overflow can't be caught). We run on
-    // the main thread (its stack grows on demand up to `ulimit -s`, and staying
-    // off a spawned thread avoids that thread's slower TLS on the eval hot path)
-    // and size the recursion guard to that limit — so anything past the stack
-    // budget becomes a clean raised error, never a core dump. `ulimit -s` is the
-    // knob for how deep recursion may go.
-    eval::set_interp_stack(eval::native_stack_limit_bytes());
-    run_cli();
+    // *aborts* the process (a Rust stack overflow can't be caught). Size the
+    // recursion guard to the stack we actually run on — so anything past the
+    // stack budget becomes a clean raised error, never a core dump.
+    if run_on_own_stack() {
+        let stack = eval::interp_stack_bytes(); // RUSTY_STACK_MB or the default
+        let handle = std::thread::Builder::new()
+            .name("rusty-interp".into())
+            .stack_size(stack)
+            .spawn(move || { eval::set_interp_stack(stack); run_cli(); })
+            .expect("failed to spawn interpreter thread");
+        // run_cli owns its own process::exit paths; join just waits. A panic in
+        // the child (should be impossible — deep input raises now) exits non-zero.
+        if handle.join().is_err() { std::process::exit(101); }
+    } else {
+        // Linux: run in place on the main thread, guard sized to `ulimit -s`.
+        eval::set_interp_stack(eval::native_stack_limit_bytes());
+        run_cli();
+    }
 }
 
 fn run_cli() {
