@@ -23,13 +23,29 @@
 //!   refused outright while active — a subprocess (or a compiled `.so`) runs
 //!   arbitrary code this userspace guard cannot confine.
 //!
-//! HONEST SCOPE: this closes `..` traversal and symlink-at-check-time escapes,
-//! and disables the subprocess vectors. It is NOT kernel confinement — a
-//! sub-second TOCTOU where an *intermediate* path component is swapped between
-//! the canonicalize check and the kernel open remains a real residual, closable
-//! only with `openat2(RESOLVE_BENEATH)` / Landlock (a crate/OS dependency, an
-//! owner decision). The claim is "no path escapes the root under a
-//! single-threaded interpreter", never "unbreakable".
+//! KERNEL LAYER (Linux >=5.13, owner crate-decision 2026-07-23): on top of the
+//! userspace funnel above, `enable()` also applies a **Landlock** ruleset that
+//! confines this thread (and its children) to read/write ONLY beneath the root,
+//! then `restrict_self()`s — a one-way, kernel-enforced latch that mirrors the
+//! userspace one. This is DEFENSE IN DEPTH: because the kernel checks EVERY
+//! `open()`, it closes the two residuals the userspace guard alone couldn't —
+//! (1) the check-vs-open TOCTOU (an intermediate component swapped between our
+//! `canonicalize` and the kernel `open`), and (2) a *forgotten* guard on a
+//! future file builtin. It is BEST-EFFORT: on a kernel without Landlock (or a
+//! non-Linux build) it is a silent no-op, so it can only ever HARDEN, never
+//! weaken, the userspace floor.
+//!
+//! HONEST SCOPE: the userspace latch is the guaranteed floor on every platform;
+//! the Landlock layer adds kernel enforcement only where it is available, and
+//! never claims to be present when it is not (verify with the manual probe
+//! `benchmarks/sandbox_landlock_probe.sh`, not a golden — Landlock availability
+//! is kernel-dependent, so it can't be a portable expected-output row). The
+//! claim is "no path escapes the root; on a Landlock-capable kernel the kernel
+//! enforces it too", never "unbreakable". CONSEQUENCE of real kernel
+//! confinement: while sandboxed, the process may open ONLY files beneath the
+//! root — so anything that reads outside it (e.g. `llm`'s DNS resolver touching
+//! `/etc/resolv.conf`) will fail. That is the confinement working as intended,
+//! not a bug; don't sandbox a run that needs the network.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -57,9 +73,53 @@ pub fn enable(root: &str) -> Result<PathBuf, String> {
             }
         }
         *cur = Some(canon.clone());
+        // Kernel layer: best-effort Landlock confinement to `canon`. The userspace
+        // latch above is the guaranteed floor; this only hardens it, so a failure
+        // (old kernel, Landlock off, non-Linux) is a silent no-op — never fatal.
+        // Applied AFTER the userspace latch is set so the two can't disagree, and
+        // on every narrow too (Landlock rulesets stack by intersection → narrower).
+        apply_kernel_confinement(&canon);
         Ok(canon)
     })
 }
+
+/// Apply a Landlock ruleset confining this thread to read/write beneath `root`,
+/// then `restrict_self`. Best-effort and infallible from the caller's view:
+/// swallows every error so the userspace floor is never weakened by a kernel that
+/// can't (or won't) enforce this. See the module docs' KERNEL LAYER note.
+#[cfg(target_os = "linux")]
+fn apply_kernel_confinement(root: &Path) {
+    use landlock::{
+        Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
+        RulesetAttr, RulesetCreatedAttr, ABI,
+    };
+    // Request the widest access set the crate knows; BestEffort downgrades the
+    // handled rights to whatever THIS kernel actually supports (or to nothing on a
+    // kernel with no Landlock at all — a clean no-op, not an error).
+    let abi = ABI::V5;
+    let all = AccessFs::from_all(abi);
+    let result = (|| -> Result<landlock::RestrictionStatus, Box<dyn std::error::Error>> {
+        let fd = PathFd::new(root)?; // opens the root dir to anchor the rule
+        Ok(Ruleset::default()
+            .set_compatibility(CompatLevel::BestEffort)
+            .handle_access(all)?
+            .create()?
+            .add_rule(PathBeneath::new(fd, all))?
+            .restrict_self()?)
+    })();
+    // Golden-safe introspection: only when RUSTY_SANDBOX_DEBUG is set, and only to
+    // STDERR (run_tests.sh diffs stdout, so this can never move a golden). Lets the
+    // manual probe confirm the kernel actually enforced the ruleset on this kernel.
+    if std::env::var_os("RUSTY_SANDBOX_DEBUG").is_some() {
+        match &result {
+            Ok(s) => eprintln!("landlock: {:?}", s.ruleset),
+            Err(e) => eprintln!("landlock: not applied ({})", e),
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_kernel_confinement(_root: &Path) { /* no Landlock off Linux — floor only */ }
 
 pub fn is_active() -> bool { ROOT.with(|r| r.borrow().is_some()) }
 pub fn root() -> Option<PathBuf> { ROOT.with(|r| r.borrow().clone()) }

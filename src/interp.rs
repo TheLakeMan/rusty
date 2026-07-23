@@ -1433,6 +1433,7 @@ pub fn setup_builtins(env: &Env) {
     b!("save-model", |args| {
         match (args.first(), args.get(1)) {
             (Some(Value::String(path)), Some(v)) => {
+                crate::sandbox::check_write(path, "save-model")?;
                 let body = model_to_json(v)?;
                 let envelope = serde_json::json!({ "rusty-model": 1, "value": body });
                 let text = serde_json::to_string_pretty(&envelope)
@@ -1447,6 +1448,7 @@ pub fn setup_builtins(env: &Env) {
     b!("load-model", |args| {
         match args.first() {
             Some(Value::String(path)) => {
+                crate::sandbox::check_read(path, "load-model")?;
                 let text = std::fs::read_to_string(path)
                     .map_err(|e| format!("load-model: cannot read {}: {}", path, e))?;
                 let envelope: serde_json::Value = serde_json::from_str(&text)
@@ -2022,6 +2024,9 @@ pub fn setup_builtins(env: &Env) {
         };
         let val = &args[1];
         let mem_path = memory_path();
+        // Under an active sandbox, ~/.rusty is outside the box — refuse the escape
+        // (userspace floor; Landlock also refuses it on Linux). No-op when inactive.
+        crate::sandbox::check_write(&mem_path.to_string_lossy(), "remember")?;
         // Read existing, remove old entry for this key, append new one
         let existing = std::fs::read_to_string(&mem_path).unwrap_or_default();
         let filtered: Vec<&str> = existing.lines()
@@ -2046,6 +2051,7 @@ pub fn setup_builtins(env: &Env) {
             _ => return Err("recall: key must be a string or symbol".into()),
         };
         let mem_path = memory_path();
+        crate::sandbox::check_read(&mem_path.to_string_lossy(), "recall")?;
         let content = std::fs::read_to_string(&mem_path).unwrap_or_default();
         // Find the last define for this key
         for line in content.lines().rev() {
@@ -2079,6 +2085,7 @@ pub fn setup_builtins(env: &Env) {
             _ => return Err("forget: key must be string or symbol".into()),
         };
         let mem_path = memory_path();
+        crate::sandbox::check_write(&mem_path.to_string_lossy(), "forget")?;
         let existing = std::fs::read_to_string(&mem_path).unwrap_or_default();
         let filtered: String = existing.lines()
             .filter(|l| !l.contains(&format!("(define {} ", key)))
@@ -2091,6 +2098,7 @@ pub fn setup_builtins(env: &Env) {
 
     b!("memory-list", |_args| {
         let mem_path = memory_path();
+        crate::sandbox::check_read(&mem_path.to_string_lossy(), "memory-list")?;
         let content = std::fs::read_to_string(&mem_path).unwrap_or_default();
         let entries: Vec<Value> = content.lines()
             .filter(|l| l.trim().starts_with("(define "))

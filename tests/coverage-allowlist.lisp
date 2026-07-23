@@ -10,10 +10,10 @@
   llm-proposer   ; calls llm to propose code
 
   ;; ── Host / owner side effects we won't touch in goldens ─────────────────
-  remember       ; writes the owner's real ~/.rusty/memory.lisp
-  recall         ; reads the owner's real memory store
-  forget         ; mutates the owner's real memory store
-  memory-list    ; dumps the owner's real memory keys
+  ;; remember/forget/memory-list ARE exercised by sandbox-test.lisp — called
+  ;; under an active sandbox, so they're REFUSED before touching ~/.rusty (no
+  ;; side effect), which is exactly what lets the golden exercise them safely.
+  recall         ; reads the owner's real memory store (not exercised)
   memory-seal    ; Ed25519-signs the owner's real ~/.rusty store (would write a .sig + need a key)
   memory-verify  ; verifies the owner's real store against a seal that isn't present in a golden
   ;; memory-path is exercised (string? only) in commands-test.lisp

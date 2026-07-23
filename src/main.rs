@@ -23,16 +23,39 @@ use eval::Evaluator;
 use interp::{make_env, run_code, print_repr};
 use rustyline::DefaultEditor;
 
-/// Append this process's exercised-command names to $RUSTY_COVERAGE_FILE, one
+thread_local! {
+    // The coverage-output file is opened ONCE when coverage is armed (before the
+    // script runs), and the handle is held here so the exit-time write goes to an
+    // already-open fd. That matters because a script may (sandbox-test.lisp does)
+    // call `sandbox-enable!`, which now applies a Landlock ruleset confining this
+    // process to its box — Landlock governs `open()`, not writes to a fd opened
+    // before restrict_self(). Re-opening at exit would be refused; the held fd is
+    // not. So coverage recording survives a self-confining test without the
+    // sandbox needing any exception for the coverage file.
+    static COV_FILE: std::cell::RefCell<Option<std::fs::File>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Open $RUSTY_COVERAGE_FILE for append and stash the handle, so the exit-time
+/// dump writes to a fd opened before any sandbox confinement. No-op when coverage
+/// is off or the env var is unset.
+fn arm_coverage_file() {
+    let path = match std::env::var("RUSTY_COVERAGE_FILE") { Ok(p) => p, Err(_) => return };
+    if let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        COV_FILE.with(|c| *c.borrow_mut() = Some(f));
+    }
+}
+
+/// Append this process's exercised-command names to the held coverage fd, one
 /// per line. Each golden test runs in its own process, so the coverage pass in
 /// run_tests.sh accumulates the union across the suite in a single file.
 fn dump_coverage() {
     if !trace::coverage_enabled() { return; }   // never touch the file when off
-    let path = match std::env::var("RUSTY_COVERAGE_FILE") { Ok(p) => p, Err(_) => return };
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-        for n in trace::coverage_names() { let _ = writeln!(f, "{}", n); }
-    }
+    COV_FILE.with(|c| {
+        if let Some(f) = c.borrow_mut().as_mut() {
+            for n in trace::coverage_names() { let _ = writeln!(f, "{}", n); }
+        }
+    });
 }
 
 /// Whether to run the interpreter on a freshly-spawned thread with an explicit
@@ -98,7 +121,10 @@ fn run_cli() {
         // Coverage mode is armed HERE, after make_env() — so std.lisp's own
         // bootstrap doesn't get to mark commands "covered" that no test ever
         // exercised. Coverage measures what the script runs, nothing else.
-        if std::env::var("RUSTY_COVERAGE").is_ok() { trace::coverage_set_enabled(true); }
+        if std::env::var("RUSTY_COVERAGE").is_ok() {
+            trace::coverage_set_enabled(true);
+            arm_coverage_file();   // open the fd BEFORE the script can sandbox-confine us
+        }
         let result = run_code(&code, &global, &eval);
         dump_coverage();   // before any exit path, so a failing script still reports
         match result {

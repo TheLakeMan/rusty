@@ -4,5 +4,6 @@
 (in-box-read "in-box")
 (abs-read #t dotdot-read #t abs-write #t dotdot-list #t)
 (shell #t proc-eval #t proc-pmap #t)
+(save-out #t load-out #t remember #t forget #t mem-list #t save-in ok)
 (cannot-widen #t)
 #t

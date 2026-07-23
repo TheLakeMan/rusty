@@ -37,6 +37,19 @@
                'proc-eval (refused? (lambda () (proc-eval "(+ 1 2)")))
                'proc-pmap (refused? (lambda () (proc-pmap (list "(+ 1 2)")))))) (newline)
 
+;; Model + persistent-memory builtins take a fixed or user path and used to write
+;; OUTSIDE the box unguarded — the userspace floor now refuses them too (Landlock
+;; catches them at the kernel on top, but the floor must hold with no kernel help).
+;; An in-box save-model still works, so this is confinement, not a blanket ban.
+(display (list 'save-out (refused? (lambda () (save-model "/tmp/rusty-sbx-outside.json" 1)))
+               'load-out (refused? (lambda () (load-model "/etc/hostname")))
+               'remember (refused? (lambda () (remember "k" "v")))
+               'forget   (refused? (lambda () (forget "k")))
+               'mem-list (refused? (lambda () (memory-list)))
+               'save-in  (try-catch (begin (save-model (string-append box "/m.json") 9)
+                                           (file-delete (string-append box "/m.json")) 'ok)
+                                    (e) 'FAIL))) (newline)
+
 ;; One-way latch: the sandbox can only narrow, never widen or clear.
 (display (list 'cannot-widen
   (try-catch (begin (sandbox-enable! "/tmp") #f)
