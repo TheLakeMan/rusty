@@ -335,6 +335,23 @@
                'ce-eval (check-effects (lambda (d) (eval d)))
                'ce-defrust (check-effects (lambda () (defrust (f x) (* x x))))
                'ce-graph (check-effects (lambda () (graph-compile g))))) (newline)
+
+;; Transitive (0.82.0): a call to a user-defined helper has ITS body walked too,
+;; so an effect hidden behind a function — or a chain of them — is surfaced. This
+;; closes the "hide a shell behind a helper" backdoor the shallow walk missed.
+(define (cet-helper) (shell "echo x"))
+(define (cet-a) (cet-b))
+(define (cet-b) (file-write "/x" "y"))
+(define (cet-sq x) (* x x))
+(define (cet-quad x) (cet-sq (cet-sq x)))
+;; error/gensym are DIRECT effects but must NOT propagate through a call (nearly
+;; every fn can raise — propagating would flood every caller and certify nothing).
+(define (cet-safe x) (if (equal? x 0) (error "div0") (/ 1 x)))
+(display (list 'cet-hidden (check-effects (lambda () (cet-helper)))
+               'cet-chain  (check-effects (lambda () (cet-a)))
+               'cet-pure   (check-effects (lambda (x) (cet-quad x)))
+               'cet-err-hidden (check-effects (lambda (x) (cet-safe x)))
+               'cet-err-direct (check-effects (lambda () (error "boom"))))) (newline)
 (display (list 'vh-not-nil (not nil) 'vh-not-false (not #f) 'vh-not-zero (not 0)
                'vh-if-nil (if nil 'then 'else)
                'vh-not-arity (try-catch (not) (e) 'raised))) (newline)

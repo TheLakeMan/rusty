@@ -1209,17 +1209,20 @@ pub fn setup_builtins(env: &Env) {
     // ── Effect tracking ─────────────────────────────────────────────────────
     cat!("checkers");
     b!("check-effects", |args| {
-        match args.first() {
-            Some(Value::Lambda { body, .. }) | Some(Value::Tool { body, .. }) => {
-                let mut findings = Vec::new();
-                for stmt in body.iter() { crate::effect_check::check(stmt, &mut findings); }
-                if findings.is_empty() {
-                    Ok(Value::Symbol("pure".to_string()))
-                } else {
-                    Ok(list(findings.into_iter().map(Value::String).collect()))
-                }
-            }
-            _ => Err("check-effects: argument must be a lambda or tool".into()),
+        // Transitive since 0.82.0: a call to a user-defined function in scope has
+        // that function's body walked too (cycle-guarded), so an effect hidden
+        // behind a helper is surfaced — closing the "hide a shell behind a user
+        // function" backdoor. Resolves callees against the lambda's own closure
+        // env (where its free names are bound).
+        let (body, env) = match args.first() {
+            Some(Value::Lambda { body, env, .. }) | Some(Value::Tool { body, env, .. }) => (body, env),
+            _ => return Err("check-effects: argument must be a lambda or tool".into()),
+        };
+        let findings = crate::effect_check::check_env(body, env);
+        if findings.is_empty() {
+            Ok(Value::Symbol("pure".to_string()))
+        } else {
+            Ok(list(findings.into_iter().map(Value::String).collect()))
         }
     });
     b!("effectful?", |args| {

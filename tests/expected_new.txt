@@ -101,4 +101,5 @@ refused
 (vh-strict (((1) "non-boolean: 0")) vh-bool verified)
 (vh-unchecked ((unchecked missing-domains-or-invariant)) vh-full verified)
 (ce-eval-string ("eval-string: evaluates arbitrary code (may perform any effect)") ce-eval ("eval: evaluates arbitrary code (may perform any effect)") ce-defrust ("defrust: compiles native code (spawns rustc, touches the filesystem)") ce-graph ("graph-compile: compiles native code (spawns rustc, touches the filesystem)"))
+(cet-hidden ("shell: runs a shell command") cet-chain ("file-write: touches the filesystem") cet-pure pure cet-err-hidden pure cet-err-direct ("error: raises an error (a control-flow side effect)"))
 (vh-not-nil #f vh-not-false #t vh-not-zero #f vh-if-nil then vh-not-arity raised)
