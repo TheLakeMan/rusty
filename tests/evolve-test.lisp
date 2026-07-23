@@ -74,4 +74,26 @@
 (display (list 'became (kg-query '((slow-double evolved-to ?src))))) (newline)
 (display (list 'domain-size (kg-query '((slow-double evolve-domain-size ?n))))) (newline)
 
+;; ── 8. Anchored receipts: a signed, tamper-evident audit record ──────────
+;; (fixed test seeds; signing is deterministic so this stays golden-stable)
+(define (squarer n) (* n n))
+(define anchor-secret "0000000000000000000000000000000000000000000000000000000000000003")
+(define anchor-pub    (cadr (ed25519-keygen anchor-secret)))
+(define other-pub     (cadr (ed25519-keygen
+  "0000000000000000000000000000000000000000000000000000000000000004")))
+;; evolve squarer to an equivalent, with a signed receipt
+(let ((r (evolve-anchored! 'squarer '(lambda (n) (* n n)) (list (range 0 6)) anchor-secret)))
+  (display (list 'anchored (car r) (cadr r)))) (newline)     ; (anchored ok squarer)
+;; the honest record verifies against the issuer's out-of-band public key
+(display (list 'verify-ok (evolve-verify-anchored 'squarer anchor-pub))) (newline)   ; #t
+;; a different key does not
+(display (list 'wrong-key (evolve-verify-anchored 'squarer other-pub))) (newline)    ; #f
+;; tamper-evidence: a record claiming a DIFFERENT source fails the real anchor
+(define real-sig  (evolve--kg-get 'squarer 'evolve-anchor))
+(define real-size (evolve--kg-get 'squarer 'evolve-domain-size))
+(display (list 'tampered-record
+               (ed25519-verify anchor-pub
+                 (evolve--serialize (list 'squarer '(lambda (n) (+ n n)) real-size))
+                 real-sig))) (newline)                       ; #f — the anchor refuses it
+
 (display "EVOLVE TESTS DONE") (newline)

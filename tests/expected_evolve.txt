@@ -16,4 +16,8 @@
 (verdicts (((?v ok)) ((?v rejected)) ((?v failed))))
 (became (((?src (lambda (n) (* n 2)))) ((?src (lambda (n) (+ n n)))) ((?src (lambda (n) (* 2 n))))))
 (domain-size (((?n 25))))
+(anchored ok squarer)
+(verify-ok #t)
+(wrong-key #f)
+(tampered-record #f)
 EVOLVE TESTS DONE

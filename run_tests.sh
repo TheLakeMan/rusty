@@ -62,6 +62,7 @@ run_test "tests/fmt-test.lisp"     "tests/expected_fmt.txt"    "fmt-test.lisp (c
 run_test "tests/pkg-test.lisp"     "tests/expected_pkg.txt"    "pkg-test.lisp (package manager)"
 run_test "tests/testkit-test.lisp" "tests/expected_testkit.txt" "testkit-test.lisp (testing framework)"
 run_test "tests/evolve-test.lisp"  "tests/expected_evolve.txt"  "evolve-test.lisp (self-optimization with receipts)"
+run_test "tests/cert-test.lisp"    "tests/expected_cert.txt"    "cert-test.lisp (signed proof-exchange, re-verified independently)"
 run_test "tests/supervisor-test.lisp" "tests/expected_supervisor.txt" "supervisor-test.lisp (certifiable supervision)"
 run_test "tests/kg-test.lisp"      "tests/expected_kg.txt"     "kg-test.lisp (knowledge graph)"
 run_test "tests/discover-test.lisp" "tests/expected_discover.txt" "discover-test.lisp (command registry)"

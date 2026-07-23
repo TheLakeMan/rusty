@@ -118,3 +118,58 @@
 ;; Queryable history of a name's evolution.
 (define (evolve-receipts name)
   (kg-query (list (list name '?p '?o))))
+
+;; ── Anchored receipts (opt-in) ─────────────────────────────────────────────
+;; evolve! records the audit trail as plain kg triples — real, but rewritable.
+;; evolve-anchored! additionally SIGNS the receipt (Ed25519) so that altering
+;; the recorded (name, source, domain-size) is detectable. Same discipline as
+;; cert.lisp / shouzhong's safety island: the private key lives OFF-host, the
+;; public key travels out-of-band, and — the mingjian anchor limit — a holder
+;; of the key can re-sign a rewritten record, so the anchor proves the record
+;; came UNCHANGED from the keyholder, never that the evolution is "safe".
+;; Additive: evolve!/evolve-vet/evolve--apply! are unchanged.
+
+;; canonical serialization of the receipt claim (self-contained; strings
+;; re-quoted; documented no-embedded-quote subset, as in pcheck/cert).
+(define (evolve--serialize d)
+  (cond ((null? d)    "()")
+        ((string? d)  (string-append "\"" d "\""))
+        ((symbol? d)  (symbol->string d))
+        ((number? d)  (number->string d))
+        ((boolean? d) (if d "#t" "#f"))
+        ((pair? d)    (string-append "(" (string-join (map evolve--serialize d) " ") ")"))
+        (else (error "evolve--serialize: unrenderable datum"))))
+
+(define (evolve--receipt-msg name src size)
+  (evolve--serialize (list name src size)))
+
+;; the object of the (name pred ?o) triple in the CURRENT kg, or #f.
+(define (evolve--kg-get name pred)
+  (let ((r (kg-query (list (list name pred '?o)))))
+    (if (null? r) #f (cadr (assoc '?o (car r))))))
+
+;; evolve-anchored! : evolve!, plus a signed receipt. secret = Ed25519 seed.
+;; Returns (ok name anchor <sig>), or the gate refusal (unchanged from evolve!).
+(define (evolve-anchored! name src domains secret . opt)
+  (let ((bench (if (null? opt) #f (car opt))))
+    (let ((verdict (evolve-vet (eval name) (eval src) domains bench)))
+      (if (equal? verdict 'ok)
+          (begin
+            (evolve--apply! name src domains)
+            (let ((sig (ed25519-sign secret
+                         (evolve--receipt-msg name src (evolve--domain-size domains)))))
+              (kg-add! name 'evolve-issuer (cadr (ed25519-keygen secret)))
+              (kg-add! name 'evolve-anchor sig)
+              (list 'ok name 'anchor sig)))
+          (evolve--refuse! name verdict)))))
+
+;; Re-derive the receipt from the CURRENT kg and check the anchor against a
+;; trusted public key supplied OUT OF BAND. #t only if the recorded
+;; (name, source, domain-size) still matches what was signed.
+(define (evolve-verify-anchored name trusted-pub)
+  (let ((src  (evolve--kg-get name 'evolved-to))
+        (size (evolve--kg-get name 'evolve-domain-size))
+        (sig  (evolve--kg-get name 'evolve-anchor)))
+    (if (or (not src) (not sig))
+        #f
+        (ed25519-verify trusted-pub (evolve--receipt-msg name src size) sig))))
