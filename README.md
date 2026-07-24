@@ -123,7 +123,6 @@ Three binaries wrap one core — no interpreter logic lives in an entry point:
 | `src/lsp_main.rs` | `rusty-lsp` — a stdio language server: positioned diagnostics, completion harvested from a live env, hover, top-level symbol outline, and document formatting |
 | `src/fmt.rs` | Canonical source formatter (`rusty fmt`, `fmt-string`, the LSP formatter) — a re-indenter/spacing-normalizer that is idempotent and semantics-preserving by construction (preserves comments/strings/line breaks) |
 | `src/lib.rs` | Python bindings via PyO3 — `rusty.eval()`, `Rusty`, `RustySession` |
-| `src/llm.rs` | Vestigial — not compiled in; the live LLM client sits in `eval.rs` |
 
 [→ **Deep dive: Full architecture guide →**](./ARCHITECTURE.md)
 

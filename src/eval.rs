@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use crate::parser::Expr;
-use crate::env::{Env, EnvFrame, Value, list, cons};
+use crate::env::{Env, EnvFrame, Value, list};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -1901,9 +1901,3 @@ pub fn match_pattern(pat: &Expr, val: &Value, bindings: &mut Vec<(String, Value)
     }
 }
 
-// ── Arena helpers (future optimization) ──────────────────────────────────────
-// Currently wraps list() — wire to arena when GC is activated.
-#[allow(dead_code)]
-pub fn arena_list(items: Vec<Value>) -> Value { list(items) }
-#[allow(dead_code)]
-pub fn arena_cons(head: Value, tail: Value) -> Value { cons(head, tail) }
